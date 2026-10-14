@@ -1,0 +1,51 @@
+{
+  "id": "wealthfolio-binance-risk",
+  "name": "币安风险 · 模拟验证",
+  "version": "0.1.3",
+  "description": "仅用固定模拟数据验证账户、持仓导入和风险计算；不连接真实账户。",
+  "author": "个人项目",
+  "main": "dist/addon.js",
+  "sdkVersion": "3.9.0",
+  "minWealthfolioVersion": "3.9.1",
+  "enabled": true,
+  "contributes": {
+    "routes": [
+      {
+        "id": "wealthfolio-binance-risk"
+      }
+    ],
+    "links": {
+      "sidebar": [
+        {
+          "id": "wealthfolio-binance-risk",
+          "route": "wealthfolio-binance-risk",
+          "label": "币安风险 · 模拟",
+          "icon": "squares-four",
+          "order": 100
+        }
+      ]
+    }
+  },
+  "hostDependencies": {
+    "react": "^19.2.0",
+    "@wealthfolio/addon-sdk": "^3.9.0"
+  },
+  "permissions": [
+    {
+      "category": "secrets",
+      "functions": [
+        "set",
+        "get",
+        "delete"
+      ],
+      "purpose": "仅固定假凭据安全存储生命周期验证；无真实输入或认证请求"
+    },
+    {
+      "category": "files",
+      "functions": [
+        "openSaveDialog"
+      ],
+      "purpose": "导出严格白名单的固定模拟状态"
+    }
+  ]
+}
