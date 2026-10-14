@@ -8,9 +8,11 @@
 | Funding `POST /sapi/v1/asset/get-funding-asset` | USER_DATA 签名；POST 是查询，不是划转 | 官方接口存在，四个余额桶保留，固定响应解析与签名请求构造 | 四桶是否互斥/总量口径、权限、真实划转时一致性 |
 | Stocks 当前真实证券持仓/现金 | 没有已确认完整接口 | 股票 REST 文档含行情、订单、成交、代币转换及监听密钥；Account 页仅免责声明 | **完整只读持仓+现金快照、分页和权限未确认**，保持 unsupported |
 | bStocks | 与真实证券不同的代币化证券 | 官方 FAQ 区分法律结构；不直接等于底层股票，不混合资产身份 | 实际账户位置、余额、乘数与估值均未实现 |
-| 公开时间 `GET /api/v3/time` | 无密钥 | 页面提供经宿主代理探测按钮；请求地址固定 | 官方桌面网络代理实际连通未测 |
+| 公开时间 `GET /api/v3/time` | 无密钥 | 官方定义及 v0.1.4 模拟校准；地址固定 | 官方代理未调用，本版没有网络权限/探测按钮 |
 
 ## 官方来源
+
+2026-10-14 v0.1.4 增量：重新核实官方 time/account/ticker/price 及 GET 参数规则。只在 mock 中构造和解析，没有公开/私人 API 请求。单账号 UID 独立于 Key；updateTime 不当余额采集时间，ticker 无成交时间。仅 BTCUSDT 有模拟映射，USDT 同币种计价不能当 USD。未知资产缺价、额外字段不保存，见 REVIEW-PACKET。
 
 - [Spot 账户信息](https://github.com/binance/binance-spot-api-docs/blob/master/rest-api.md#account-information-user_data)
 - [端点安全](https://developers.binance.com/en/docs/catalog/core-trading-spot-trading/api/rest-api/endpoint-security-type)

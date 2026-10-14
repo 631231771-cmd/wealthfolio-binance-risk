@@ -7,8 +7,9 @@ v0.1.3：新增 credentials.ts（仅假凭据、官方 secrets 双槽、认证�
 ```text
 固定币安响应 → binance.ts 标准化 → fixtures.ts 补充固定报价
               → domain.ts 完整批次替换 → 风险纯函数 → addon.tsx 页面
-              → host.ts 正式 SDK → 主程序 HOLDINGS 账户/快照/模拟报价 → 读回
 插件状态 → 官方 storage → 独立 JSON 导出/恢复
+官方 secrets 假凭据 → SpotOfflineReader → mock time/account/ticker 响应
+  → Spot 标准快照 → 带 TTL 的通用风险函数 → 单账号 Spot 页面（仅内存）
 ```
 
 - `domain.ts`：平台无关账户、资产、快照、状态、汇率与风险函数，无网络/SDK/React。
@@ -35,6 +36,8 @@ lastKnownSubtotal 是保留快照可估值部分，无历史或全部无法估�
 
 ## 同步与主程序写入
 
+本节的 host 导入是历史能力及保留的离线契约，不是 v0.1.4 当前可调用路径。
+
 模拟批次要求预期账户齐全、账户身份匹配、batchId/asOf 一致，随后替换旧快照。失败保留上一批数据并标记当前不可用，防止划转过程中拼接新旧账户。
 
 演示导入仅接受 fixture、完整 Spot/Funding 批次及受控 BTC/USDT；专用模拟账户和 WRISKDEMO 资产避免修改真实 BTC 全局报价模式。官方主程序生成账户 UUID，插件使用返回值，并通过 providerAccountId 与所有权标记复用账户；重复来源或所有权不匹配时拒绝写入。当前映射保存至 host-account-map-v1。`snapshots.save` 导入数量，`quotes.update` 写测试报价，`portfolio.update` 重算，`snapshots.getByDate` 核对数量。没有采购成本证据，所以 averageCost=0 表示未知演示成本，不拿价格伪造收益。
@@ -56,5 +59,13 @@ external 不允许 demo 来源、WRISKDEMO 或固定报价；账户按 platform/
 插件 storage SQLite 持久化、按插件隔离、更新保留、卸载清除；当前每项约 250 KB。便携导出清除 addon storage。JSON 逐字段模拟白名单，formatVersion=2，正常 v1 可读；未知字段导出丢弃、恢复拒绝，文案本地批准，数值/身份/时间校验。external 导出和持久化尚未开放，恢复不写主程序；真实备份需另行审计。
 
 ## 维护与扩展
+
+v0.1.4 新增 spot.ts 与 spot-fixture.ts。只构造 GET time/account/ticker，没有可配置主机/方法/路径。时间响应使用请求中点，拒绝 >2 秒 RTT、>60 秒偏移或倒退时钟；以校准毫秒签名，recvWindow=5000。账户采集起止不使用 updateTime，后者不是当前余额的证明。ticker/price 无成交时间，本轮记录报价接收时间，不声称证明上游价格新鲜度。
+
+响应 UID 决定身份，换假 Key 不增仓，已有会话 UID 变化拒绝。纯标准化区分 fixture/external；external 不带模拟标识、报价或成本，资产类型 unknown。固定模拟只审核 BTCUSDT 映射，USDT=1 USDT 是同币种计价，其余资产保留缺价。单 Spot 完整覆盖不代表整个 Binance 资产，Funding/Stocks 没有新请求或账户设置。
+
+enforceFixtureFreshness 只给新模拟链路增加时效检查，不给 external 绕过 TTL；旧固定基准保持默认行为。401/403/签名/时钟无自动重试，429/418 冷却，超时中止 mock signal；断开世代标记拒绝新请求和在途结果。工厂标记只防错误注入，不是恶意代码沙箱。真实入口调用原无条件阻断门，控制器不持有 ctx.api.network。
+
+新 Spot 会话不持久化、不导出，现有白名单只备份旧模拟基准。页面每 10 秒重算，不采集；删除假凭据按钮先调用 disconnect。没有改变 SDK/依赖、主程序数据库、旧资产或 AI 配置。
 
 A 股以后添加官方连接器或 CSV 标准化入口即可复用风险函数；具体券商权限/持仓接口仍需单独调查。现在没有券商代码或复杂抽象。主程序升级可能改变 SDK 签名、权限检测、宿主 React 版本、路由、快照日期规则或备份范围；按固定版本重新验收，不自动跟随最新版本。

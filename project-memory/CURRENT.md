@@ -1,27 +1,24 @@
 # 当前状态
 
-日期：2026-10-14。当前代码/官方 Windows 已安装版本 v0.1.3。唯一根目录 F:\Code\风控，旧 world 不属于本项目。
+日期：2026-10-14。唯一根目录 F:\Code\风控。源码/本地包 v0.1.4；官方 Wealthfolio v3.9.1 已安装插件仍为 v0.1.3。
 
 ## 已完成且验证
 
-- 官方 Wealthfolio v3.9.1 / SDK 3.9.0，独立测试资料 WRISK Windows 验收 20261013。
-- v0.1.3 删除网络与宿主资产读写权限；仅 secrets.set/get/delete 和模拟文件导出，不请求 use。旧 host 导入只保留离线回归，不在本版页面或打包路径中使用。
-- 固定假凭据双槽候选/读回/切换、断开标记、所有槽位删除核对；无真实输入。Windows 保存 v1、真实重启读回 v1、替换 v2、用户删除后独立读取 null 通过。成功保存日志未发现假 Key/Secret 标记。
-- fixture/external 入口分开；外部采集起止、余额/报价/FX 默认时效验证；来源身份不依赖 API Key；Funding 只存四原始字段不返回总量；未核对跨钱包汇总阻断。
-- 模拟存储/导出递归白名单；未知恢复字段拒绝，正常历史 v1 兼容 formatVersion=2；原状态升级通过。
-- 完整 verify：46 项自动化、类型、构建、ZIP、6 种编译页面显示通过。基准 30000 USD / 5500 USD 不回归；Windows 升级及重启保持。
-- 产物 artifacts/wealthfolio-binance-risk-0.1.3.zip；SHA256 801b27e64f2876bbcab33562bf3599b0b689eda32c82cb5bc431155db18703dc。旧包/记录保留。最终文档更新未重新打包。
-- 安全源码证据、配置步骤、文件改动和实际测试见 docs/SECURITY.md、docs/VALIDATION.md。
+- Spot 单账号离线链路：固定 GET time/account/ticker、时间校准、HMAC、响应验证、free+locked、UID 去重、独立价格及通用风险。
+- 官方 secrets 固定假凭据；无真实输入。真实发送硬阻断，清单仅 secrets.set/get/delete 与 files.openSaveDialog，无网络或宿主资产权限。
+- 新会话 fixture，仅内存不保存/导出，不与旧基准相加。24000 USDT，BTC -20% 损失 4000 USDT；USDT 不假定 USD 平价。Funding 未覆盖、Stocks unsupported，整个 Binance 总额不可用。
+- 完整 verify 65 项测试/类型/构建/ZIP/6 种旧状态显示通过。19 项新测试覆盖认证/403/429/签名/时钟/超时、取消/并发、价格、零、时效、UID/来源；旧 30000 USD / 5500 USD 不回归。
+- 本轮未操作客户端/测试数据库/DeepSeek；v0.1.4 Windows 未安装或交互验收。v0.1.3 secrets/重启实测留在 VALIDATION，不能冒充新版本实测。
+- 仓库 https://github.com/631231771-cmd/wealthfolio-binance-risk 已确认 Private；main/v0.1.3 基线 91f3432，开发分支 feature/spot-readonly-offline，提交推送以 Git 为准。接力见 docs/GIT-WORKFLOW.md。
+- 包 artifacts/wealthfolio-binance-risk-0.1.4.zip，校验 BUILD-RECEIPT.json；旧 v0.1.3 ZIP 未覆盖。精简 docs/REVIEW-PACKET.md + artifacts/v0.1.3-to-v0.1.4.patch。
 
-## 尚未解决的真实接入阻塞
+## 未解决的真实接入阻塞
 
-- 官方网络 reqwest 错误可能含签名 URL，Tauri invoke 会记原始错误。审计日志不含 query 不能保护通用错误日志。模拟链路负对照已验证，官方网络/日志全链路未解决；认证永久阻断本阶段，不请求 Binance。
-- Funding 四字段互斥/相加口径未证实；内部划转一致性没有真实采集/对账方案，统一批次或时间不能证明准确合计。Stocks 只读持仓/现金仍未确认。
-- AI 配置源码按资料库，但独立资料并非自动禁用。Windows 只读确认当前 OpenAI 兼容 Provider 启用且含 DeepSeek 模型，九项访问全部勾选（账户含现金、持仓含净资产）。未更改任何开关/聊天；关闭后权限拒绝、旧上下文隐私及跨资料库实际验证未完成。
-- 原生 OS 故障与跨键回滚不保证原子；旧槽保留，错误时保持认证阻断。普通 storage 不存凭据，JS 内存不声称可靠清零。
-- external 时效/源身份/恶意恢复为脱敏自动化验证；当前 TTL 不是生产口径。新的文件导出恢复未 Windows 实测；备份、真实权限/数据完整性尚未验证。
-- 卸载/本地删除不撤销交易所密钥；未来须提示用户在币安端撤销。无真实密钥、真实账户、定时同步、A股、新仓位模拟等产品功能。
+- 官方 v3.9.1 reqwest/invoke 原始 URL 日志风险未修复；mock 不是原生链路安全证明，认证继续拒绝。
+- AI 首次真实资料须禁用外部 Provider、空工具白名单、隔离旧上下文并实测拒绝；本轮没改设置。原生 secrets 故障与真实只读权限未实测。
+- 真实 Spot 分类/价格完整性/上游时效、对账与真实备份未验收；当前只审核 BTC/USDT 模拟映射。
+- Funding 四桶、跨钱包划转一致性和 Stocks 持仓/现金能力未验证。
 
 ## 下一步唯一优先任务
 
-等待用户决定是否交 Astra 复审 v0.1.3 与阻塞项。本轮停止，不开启网络、不连接真实 Binance、不修改 AI 设置。
+由用户将 REVIEW-PACKET 和增量补丁交 Astra 复审，再决定官方假签名/AI 隔离验收；未经批准不输入真实密钥、不启用网络或真实 Spot。

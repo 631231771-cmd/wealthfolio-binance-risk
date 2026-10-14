@@ -168,3 +168,45 @@ SHA256：`801b27e64f2876bbcab33562bf3599b0b689eda32c82cb5bc431155db18703dc`。�
 - Stocks 完整只读证券持仓/现金 API 仍未确认。
 
 已完成可控基础整改，具备交 Astra 下一轮安全复审的条件；**不具备连接真实 Binance 的条件**。下一步唯一建议为复审源码和未解决阻塞，再决定是否批准官方代理假请求与 AI 拒绝工具验证。本轮立即停止。
+
+## v0.1.4：Spot 优先离线链路（2026-10-14）
+
+### 实际执行与结果
+
+本机 Node 24.17.0，完整 npm run verify：**65 项自动化测试，0 失败**；类型、构建、ZIP 与 6 种编译入口旧风险显示全部通过。新增 19 项 Spot 测试。后续仅 README 更新后再次执行 package/smoke/receipt，源码和已通过测试未改；最终包校验如下。
+
+| 验证 | 结果 / 边界 |
+|---|---|
+| time→account→ticker→标准化→风险 | 固定假凭据、模拟响应全流程通过；0.4 BTC + 4000 USDT，BTCUSDT=50000，24000 USDT / BTC -20% 损失 4000 USDT |
+| 旧模拟手算 | 30000 USD / 5500 USD 保持；USD 基准与新 USDT 会话不相加 |
+| 服务器时钟 | 中点校准；慢 RTT、倒退、无效/微秒响应、偏移过大拒绝；签名与 Node 独立 HMAC 比较通过 |
+| 401/403/429、-1022/-1021、超时 | 固定错误分类，失败保留数量但当前 null；429 冷却无自动重试；实际定时器超时中止 mock signal |
+| 重复 / 换假 Key / UID 改变 | 同 UID 只有一份替换快照；不同 UID 拒绝，旧来源不清零 |
+| 缺价 / 错 symbol / 零或非法价格 | 数量保留，无旧报价回填，缺口明确，不捏造零；未知资产缺价/unknown |
+| 成功空余额 / 首次失败 | 成功空为 0；首次失败当前和历史不可用 |
+| 过期/未来余额、价格、缺 FX | 新 fixture 链路也执行 TTL；过期余额当前不可用、历史保留；USDT 不默认转换 USD |
+| 取消 / 并发 | 并发拒绝、断开拒绝新请求及在途成功；UI 删除前断开，凭据只通过原官方 secrets |
+| 来源 / 额外字段 | fixture/external 身份不同；external 无模拟报价/成本；额外字段和认证信息不进入状态；新 Spot 不导出到旧备份 |
+| 权限 / 生产网络 | 编译包没有 direct fetch、network.request、浏览器存储或宿主写入；仅 secrets set/get/delete 与 files.openSaveDialog；真实发送门继续阻断 |
+| 官方日志链路 | 重新读取 tag v3.9.1 network.rs:103/121、tauri/core.ts:55；风险仍存在。原模拟故障服务器负对照通过，不是官方 Windows 日志保护通过 |
+| Windows v0.1.4 | **未安装、未交互复验**。没有操作客户端或已安装 v0.1.3 测试资料库 |
+| 真实 Binance / AI | 无真实凭据、无公开/私人 API 请求、未开启网络、未改 DeepSeek/Provider/聊天 |
+
+### 产物与版本
+
+新包 artifacts/wealthfolio-binance-risk-0.1.4.zip；
+SHA256 **fb5fc4690ee041a7596a4c58141a0834ec7fbf4e84512982f4e53159de940df6**。
+旧 v0.1.3 ZIP 原样保留，SHA256 801b27e64f2876bbcab33562bf3599b0b689eda32c82cb5bc431155db18703dc。
+
+GitHub Private 仓库已创建并核查：
+https://github.com/631231771-cmd/wealthfolio-binance-risk。
+main/v0.1.3 保存基线提交 91f3432；本轮 feature/spot-readonly-offline 独立开发，不自动合入 main。
+只提交源码、测试、已清洗文档、锁文件和配置；没有上传真实/模拟运行时账户资料、DB、日志、ZIP、node_modules、提示词文件或凭据。源码中固定公开假值是明确审核的测试向量。版本号和依赖锁保持一致，依赖版本未升级。
+
+### 修改文件与剩余条件
+
+新增 src/spot.ts、src/spot-fixture.ts、tests/spot.test.ts、docs/REVIEW-PACKET.md、docs/GIT-WORKFLOW.md 和 .github/workflows/verify.yml；调整 src/addon.tsx、src/domain.ts、scripts/smoke-package.mjs、manifest、package/lock 与 README/AGENTS/CURRENT/ARCHITECTURE/API-VERIFICATION/SECURITY/WINDOWS-ACCEPTANCE/VALIDATION。基线先补充 .gitignore 后提交。没有修改 credentials/binance/backup/host 的历史实现或宿主代码。
+
+审查材料 70 行以内，增量 artifacts/v0.1.3-to-v0.1.4.patch 只给相关代码，不包含整套上游/文档。Git 提交、当前 HEAD 与远端同步以 git log、ls-remote 为准；GitHub Actions 结果独立记录，不能把本地通过当成远端 CI 已通过。
+
+真实 Spot 仍阻塞：官方日志保护/假请求全链路、外部 AI 拒绝工具实测、真实凭据错误路径与只读权限、分类/价格时效与对账/备份边界。Funding/Stocks 未接入，单 Spot 不冒充全账号。下一步仅交 Astra 增量复审，由用户决定后续验收授权。

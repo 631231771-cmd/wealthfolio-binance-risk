@@ -126,7 +126,7 @@ export interface RiskReport {
   fxUsed: FxRate[];
   weightsBasis: 'current-priced-covered-subset';
 }
-export interface FreshnessPolicy { now: string; balanceMaxAgeMs: number; priceMaxAgeMs: number; fxMaxAgeMs: number }
+export interface FreshnessPolicy { now: string; balanceMaxAgeMs: number; priceMaxAgeMs: number; fxMaxAgeMs: number; enforceFixtureFreshness?: boolean }
 export const DEFAULT_FRESHNESS = {balanceMaxAgeMs:60_000,priceMaxAgeMs:120_000,fxMaxAgeMs:300_000};
 export function calculateRisk(state: PortfolioState, base: string, rates: FxRate[], shocks: Record<string, string> = {}, policy: FreshnessPolicy = {now:new Date().toISOString(),...DEFAULT_FRESHNESS}): RiskReport {
   if (new Set(state.accounts.map(a => a.id)).size !== state.accounts.length || new Set(state.accounts.map(accountKey)).size !== state.accounts.length) throw new Error('重复账户身份，拒绝重复计入');
@@ -149,8 +149,8 @@ export function calculateRisk(state: PortfolioState, base: string, rates: FxRate
     if (snapshot?.dataMode==='external') {
       if (account.id.startsWith('demo-') || account.sourceAccountId==='fixture-user') throw new Error('外部快照不得使用模拟账户');
       if (account.platform==='binance' && ['funding','securities'].includes(account.kind)) { issues.push(`${account.name}：资金口径或股票查询未确认，不计算总量`); continue; }
-      if (!fresh(snapshot.collectionStartedAt ?? '',policy.balanceMaxAgeMs) || !fresh(snapshot.asOf,policy.balanceMaxAgeMs)) { ready=false; issues.push(`${account.name}：余额已过期或时间在未来`); }
     }
+    if (snapshot && (snapshot.dataMode==='external' || policy.enforceFixtureFreshness) && (!fresh(snapshot.collectionStartedAt ?? snapshot.asOf,policy.balanceMaxAgeMs) || !fresh(snapshot.asOf,policy.balanceMaxAgeMs))) { ready=false; issues.push(`${account.name}：余额已过期或时间在未来`); }
     if (!ready || !snapshot) {
       const status = state.statuses[account.id]?.state;
       const reason = status === 'unsupported' ? '尚未支持' : status === 'failed' ? '同步失败，当前数据失效' : '尚未连接或没有有效快照';
@@ -183,7 +183,7 @@ export function calculateRisk(state: PortfolioState, base: string, rates: FxRate
       historicalPricedCount++;
       lastKnown = lastKnown.add(value);
       if (!ready) continue;
-      if (snapshot.dataMode==='external' && (!fresh(p.price.asOf,policy.priceMaxAgeMs) || rate && (!fresh(rate.asOf,policy.fxMaxAgeMs) || /fixture|固定|模拟/i.test(rate.source)))) {
+      if ((snapshot.dataMode==='external' || policy.enforceFixtureFreshness) && (!fresh(p.price.asOf,policy.priceMaxAgeMs) || rate && (!fresh(rate.asOf,policy.fxMaxAgeMs) || snapshot.dataMode==='external' && /fixture|固定|模拟/i.test(rate.source)))) {
         unpricedPositionCount++; issues.push(`${account.name}/${p.asset.code}：价格或汇率已过期、未来或使用模拟汇率`); continue;
       }
       pricedCount++;

@@ -27,6 +27,10 @@
 
 ## 测试与交付
 
+v0.1.4 SpotOfflineReader 只接受固定假凭据和工厂 mock transport；标记不是任意代码的网络沙箱，真实发送仍硬阻断。新会话只在内存，UID 身份不含 API Key，USDT 计价不假设 USD 平价。独立取价失败不沿用旧报价，新链路 fixture 也执行 TTL，旧手算默认行为不变。不得把 mock 替换成宿主代理来偷偷启用认证。
+
+Git 接力先看最近提交和相关差异，按 docs/GIT-WORKFLOW.md 操作。main/v0.1.3 保留旧基线，开发分支 feature/spot-readonly-offline；Private 也不得上传个人数据。只有当轮授权才提交/推送，不强推或自动合并。精简审查材料不超过 200 行。
+
 执行 `npm run verify`，类型、风险、同步故障、签名、宿主调用契约和包入口检查都必须通过。SDK 替身、静态渲染、编译成功不能当作实际桌面安装成功。需要实际运行的检查按 `docs/WINDOWS-ACCEPTANCE.md` 记录结果与版本。
 
 依赖保持精确版本和锁文件；SDK 升级须先核对 API、权限、宿主依赖、路由和备份边界，禁止批量升级。修改行为时添加有价值的测试并更新相关文档、CURRENT、验证记录；CURRENT 只留一个优先任务。

@@ -52,4 +52,6 @@ fixture 保留手算；external 解析入口不继承模拟报价/成本或 demo
 
 ## 下一轮最小建议
 
+v0.1.4 增量：Spot 仅固定假凭据与模拟传输，不增加权限，真实发送仍阻断。重新核查 v3.9.1 network.rs:103/121 与 tauri/core.ts:55，风险未解决。最小上游方向是在返回前移除 reqwest URL（如 without_url）并只暴露已批准错误码，官方发行版落地后以批准的 HTTPS 假请求故障验证所有日志路径。本项目不改宿主，不用插件 catch 或关闭日志假装解决。官方 GET account 参数在 query，不能假定改 POST 或移入 body 就兼容。SDK 没有已验证托管 HMAC 代替方案。下一轮优先 REVIEW-PACKET 和增量补丁。
+
 先将代码、SECURITY 与 VALIDATION 交 Astra 复审。只做官方代理假签名故障链路和资料库 AI 拒绝读工具的独立验收；日志未解决前不申请真实 Key。Funding 口径、内部划转一致性、Stocks 继续阻塞，不能因为 Spot 单账户样例通过就宣称三类账户可用。

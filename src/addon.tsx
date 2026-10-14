@@ -1,15 +1,49 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import type { AddonContext, AddonEnableFunction } from '@wealthfolio/addon-sdk';
 import { applyBatch, assetKey, positionKey, calculateRisk, type PortfolioState } from './domain';
 import { emptyState, syncedFixture, fixtureBatch, fixtureShocks, DEMO_IDS, FIXTURE_TIME } from './fixtures';
 import { exportState, restoreState, sanitizeFixtureState } from './backup';
 import { DummyCredentials } from './credentials';
+import { SpotOfflineReader, spotRisk, SpotError } from './spot';
+import { spotFixtureTransport, type SpotScenario } from './spot-fixture';
 import './style.css';
 
+function SpotPanel({reader,scenario}:{reader:SpotOfflineReader;scenario:{current:SpotScenario}}) {
+  const [now,setNow]=useState(Date.now), [busy,setBusy]=useState(false), [message,setMessage]=useState('尚未采集模拟 Spot；先在下方保存固定假凭据。');
+  const state=reader.getState();
+  useEffect(()=>{const timer=setInterval(()=>setNow(Date.now()),10_000);return()=>{clearInterval(timer);reader.disconnect();};},[reader]);
+  const report=spotRisk(state,now), amount=(value:string|null)=>value===null?'不可用':`${value} USDT`;
+  const sync=async()=> {
+    setBusy(true);
+    try {await reader.sync();setMessage('仅固定模拟响应已处理；没有请求 Binance 或写入主程序。');}
+    catch(e){setMessage(e instanceof SpotError?e.message:'离线读取失败');}
+    finally {setNow(Date.now());setBusy(false);}
+  };
+  return <section>
+    <h2>一个 Binance 账号 · Spot 离线读取链路</h2>
+    <p>fixture 模拟数据，仅在本页面内存；重开页面需重做采集。Funding 未覆盖，Stocks unsupported，整个 Binance 总资产不可用。计价 USDT，不假定 USDT 等于 USD。</p>
+    <label>固定响应情景 <select disabled={busy} onChange={e=>scenario.current=e.target.value as SpotScenario} defaultValue="normal">
+      {(['normal','zero','missing-price','401','403','429','signature','clock','timeout'] as const).map(value=><option key={value} value={value}>{value}</option>)}
+    </select></label>
+    <button disabled={busy} onClick={sync}>读取模拟 Spot／重复读取</button>
+    <button onClick={()=>{reader.disconnect();setNow(Date.now());setMessage('离线读取已断开；保留历史快照。假凭据删除请使用下方专用流程。');}}>断开离线读取</button>
+    <p role="status">{message}</p>
+    <p>Spot 当前可估值小计：{amount(report.coveredSubtotal)}；Spot 已定价范围 BTC -20% 情景损失：{amount(report.stressLoss)}。</p>
+    <p>Spot 覆盖：{report.coverage}；缺估值 {report.unpricedPositionCount} 条；账户集中度 {report.accountHhi??'不可用'}；资产集中度 {report.assetHhi??'不可用'}。</p>
+    <p>Spot 最近已知可估值部分：{amount(report.lastKnownSubtotal)}；{report.lastKnownSnapshotTimes.join('、')||'无快照'}。历史结果，不是当前实时资产。</p>
+    <table><thead><tr><th>来源／钱包／资产</th><th>数量</th><th>报价及采集时间</th><th>当前估值 USDT</th><th>占比</th></tr></thead><tbody>
+      {Object.values(state.snapshots).flatMap(s=>s.positions.map(p=><tr key={assetKey(p.asset)}><td>fixture / Binance / Spot / {p.asset.code} / {p.asset.type}</td><td>{p.quantity}</td><td>{p.price?`${p.price.value} / ${p.price.asOf}`:'缺价格'}；余额 {s.collectionStartedAt} 至 {s.collectionEndedAt}</td><td>{report.eligiblePositionKeys.includes(positionKey(s.accountId,p.asset))?report.assetValues[assetKey(p.asset)]:'不可用'}</td><td>{report.assetWeights[assetKey(p.asset)]??'不可用'}</td></tr>))}
+    </tbody></table>
+    <ul>{report.issues.map((issue,i)=><li key={i}>{issue}</li>)}</ul>
+  </section>;
+}
+
 function RiskPage({ ctx, initial }: { ctx: AddonContext; initial: PortfolioState }) {
-  const [state,setState] = useState(initial), [busy,setBusy] = useState(false), [message,setMessage] = useState('尚未执行主程序导入验收');
+  const [state,setState] = useState(initial), [busy,setBusy] = useState(false), [message,setMessage] = useState('固定模拟基线；没有主程序读写权限');
   const [backup,setBackup] = useState('');
   const credentials=useMemo(()=>new DummyCredentials(ctx.api.secrets),[ctx]);
+  const spotScenario=useRef<SpotScenario>('normal');
+  const spotReader=useMemo(()=>new SpotOfflineReader(credentials,spotFixtureTransport(()=>spotScenario.current)),[credentials]);
   const report = calculateRisk(state,'USD',[],fixtureShocks());
   const amount = (value: string | null) => value === null ? '不可用' : `${value} USD`;
   const run = async (work: () => Promise<string>) => {
@@ -25,7 +59,9 @@ function RiskPage({ ctx, initial }: { ctx: AddonContext; initial: PortfolioState
   return <main>
     <h1>币安风险插件 · 最小验证</h1>
     <p className="notice">仅固定模拟数据。报价时间：{FIXTURE_TIME}。Binance Stocks 未支持。请在独立测试资料库使用。</p>
-    <p>v0.1.3 安全整改：真实认证请求阻断；本版无网络及主程序资产读写权限。固定样例不代表实时余额。</p>
+    <p>v0.1.4 Spot 离线链路：真实认证请求阻断；本版无网络及主程序资产读写权限。固定样例不代表实时余额。</p>
+    <SpotPanel reader={spotReader} scenario={spotScenario}/>
+    <h2>历史模拟基准（独立保存，不与 Spot 链路相加）</h2>
     <div className="actions">
       <button disabled={busy} onClick={() => run(() => save(syncedFixture()))}>模拟同步／重复同步</button>
       <button disabled={busy} onClick={() => run(() => save(applyBatch(state,DEMO_IDS,fixtureBatch(true).map(snapshot => ({accountId:snapshot.accountId,snapshot})),FIXTURE_TIME)))}>模拟划转 0.1 BTC</button>
@@ -53,7 +89,7 @@ function RiskPage({ ctx, initial }: { ctx: AddonContext; initial: PortfolioState
       <button disabled={busy} onClick={()=>run(async()=>{await credentials.save(1);return '假凭据 v1 已保存并读回核对；保持断开。';})}>保存假凭据 v1</button>
       <button disabled={busy} onClick={()=>run(async()=>{const value=await credentials.read();return value?`安全存储读回假凭据 v${value.version}；未显示内容，保持断开。`:'安全存储读回 null；无活动凭据，保持断开。';})}>读取假凭据状态</button>
       <button disabled={busy} onClick={()=>run(async()=>{await credentials.save(2);return '假凭据 v2 已替换并读回核对；保持断开。';})}>替换假凭据 v2</button>
-      <button disabled={busy} onClick={()=>run(async()=>{await credentials.disconnectAndDelete();return '假凭据所有槽位已删除，读回 null；保持断开。';})}>断开并删除假凭据</button>
+      <button disabled={busy} onClick={()=>run(async()=>{spotReader.disconnect();await credentials.disconnectAndDelete();return '假凭据所有槽位已删除，读回 null；保持断开。';})}>断开并删除假凭据</button>
       <button disabled={busy} onClick={() => run(async () => {
         await ctx.api.files.openSaveDialog(exportState(state,null),'wealthfolio-binance-risk-fixture.json');
         return '已调用保存对话框；是否完成保存请检查文件。';
