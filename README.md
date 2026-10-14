@@ -6,13 +6,17 @@
 
 ## 当前状态
 
-**当前 v0.1.4 为 Spot 优先离线链路版，仍不能连接真实 Binance。** 官方 secrets 仅保存固定假凭据，没有真实密钥输入；权限只有 secrets.set/get/delete 与模拟文件导出。没有 secrets.use、网络或账户/持仓读写权限。旧主程序导入适配器保留作离线回归，本版页面与包不提供该路径。
+**当前 v0.1.5 为多币种 Spot 离线估值版，仍不能连接真实 Binance。** 官方 secrets 仅保存固定假凭据，没有真实密钥输入；权限只有 secrets.set/get/delete 与模拟文件导出。没有 secrets.use、网络或账户/持仓读写权限。旧主程序导入适配器保留作离线回归，本版页面与包不提供该路径。
+
+新增 `multi` 样例：BTC 0.4×50000、ETH 2×2500、BNB 10×500、SOL 20×150、DOGE 1000×0.1，加 USDT 4000，合计 **37100 USDT**。非 USDT 资产回落 20% 损失 **6620 USDT**；这个情景不覆盖 USDT 兑美元脱锚。列表含数量、报价/时间/来源、当前市值、占比及每币情景损失。`multi-missing` 缺 ETH 报价、另有 7 个无市场映射的 NOPAIR，已定价部分 32100 / 损失 5620，完整总额不可用。
+
+报价映射来自模拟官方 exchangeInfo 的 baseAsset/quoteAsset、TRADING 与 Spot 标记，不猜后缀；没有明确市场/价格、歧义映射或过期行情时保留数量、显示缺口。支持明确 USDT 市场的其他资产，其法律类型仍 unknown，不假称股票。行情构造为无认证公开 GET（单币或最多 100 symbols/批）；本轮只 mock，不实际请求、不新增网络权限。新 Spot 会话仍不持久化/导出。74 项本地测试通过，v0.1.4/v0.1.5 Windows 安装验收均待办；本轮没有控制桌面。
 
 新增一个 Binance 账号的 Spot 模拟区：固定 GET、时间校准、HMAC、响应验证、十进制余额、独立报价、UID 去重和失败保留快照。先保存固定假凭据 v1，再点击「读取模拟 Spot／重复读取」。normal 为 0.4 BTC + 4000 USDT，BTCUSDT 报价 50000，结果 24000 USDT，BTC -20% 损失 4000 USDT。USDT 是计价单位，不假定与 USD 平价。可选择零余额、缺价、401/403/429、签名、时钟和超时情景。
 
 新 Spot 会话仅在内存，重开页面需重新采集，不保存/导出到旧 fixture-state-v1；不写主程序、不与历史基准相加。Funding 未覆盖，Stocks unsupported，整个 Binance 总资产不可用。余额 TTL 60 秒、报价 120 秒；页面每 10 秒检查时效，没有自动采集。删除假凭据先断开新链路，禁止在途结果发布。
 
-下一轮只读 [精简审查材料](docs/REVIEW-PACKET.md) 和本地 artifacts/v0.1.3-to-v0.1.4.patch；[Git 接力流程](docs/GIT-WORKFLOW.md) 说明如何继续。独立私有仓库的 main 保留 v0.1.3，Spot 位于 feature/spot-readonly-offline。
+旧 [精简审查材料](docs/REVIEW-PACKET.md) 仅对应 v0.1.4/dbdf2cd，其行号不适用新版本；本轮不调用 Astra，也不重新审计。[Git 接力流程](docs/GIT-WORKFLOW.md) 说明如何继续。独立私有仓库的 main 保留 v0.1.3，Spot 位于 feature/spot-readonly-offline。
 
 保留 v0.1.3：候选安全槽读回后切换、删除/重启检查；严格模拟备份白名单（formatVersion=2，兼容正常 v1）；外部余额采集起止时间及余额/价格/FX 时效；跨钱包汇总阻断；Funding 原始字段不计算总量。v0.1.4 共 65 项自动化测试已通过，桌面状态见 VALIDATION。
 
@@ -29,7 +33,7 @@
 
 ## 给用户的安装与验收
 
-当前包位于 `artifacts/wealthfolio-binance-risk-0.1.4.zip`，旧包保留但不得用于真实数据。本版无网络权限。v0.1.4 本轮仅离线验证，尚未 Windows 安装；已安装客户端插件仍是 v0.1.3。各版本实际桌面结果见 VALIDATION。
+当前包位于 `artifacts/wealthfolio-binance-risk-0.1.5.zip`，旧包原样保留。本版无网络权限。v0.1.4/v0.1.5 尚未 Windows 安装验收；已安装版本最后确认仍为 v0.1.3，本轮未重新检查。各版本实际桌面结果见 VALIDATION。
 
 安装官方 [v3.9.1 Windows x64 发行版](https://github.com/wealthfolio/wealthfolio/releases/tag/v3.9.1)，使用独立测试资料库，在插件管理页选择从本地 ZIP 安装并审核权限。逐步操作见 [Windows 验收](docs/WINDOWS-ACCEPTANCE.md)。
 

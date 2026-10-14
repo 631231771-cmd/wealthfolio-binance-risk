@@ -1,5 +1,9 @@
 # 架构与边界
 
+v0.1.5 增量：spot-quotes.ts 解析模拟 exchangeInfo → 明确的资产/USDT 市场映射 → 单币/100 symbols 分批 ticker GET 构造 → 标准 Price。只有 TRADING 且 Spot allowed 的唯一 USDT 市场可用；非 USDT/停牌/歧义/缺价保留缺口，不截后缀猜身份。ticker 无成交时间，Price.asOf 是采集时刻，沿用 120 秒 TTL；USD 转换仍需独立 FX，本版没有。
+
+SpotOfflineReader 继续仅 mock；新行情构造不读取 secrets，不持有 ctx.api.network，不增加权限。非 USDT -20% / USDT 同币种 0% 是明确测试情景，未知法律类型不伪装普通币或真实 Stocks。SpotHoldingsTable 直接用风险报告的 eligiblePositionKeys 显示当前金额/权重/损失，过期或缺价行仍显示数量和历史报价。旧基准与新会话隔离，备份不扩展。本轮未控制桌面，v0.1.4/v0.1.5 桌面验收待办；下文保留历史版本边界。
+
 ## 模块与数据流
 
 v0.1.3：新增 credentials.ts（仅假凭据、官方 secrets 双槽、认证硬阻断）与 backup.ts（白名单清洗/严格恢复）。binance.ts 的 fixture 入口与 external Spot/Funding 原始字段入口分开。旧 host.ts 导入仅保留离线回归，不再由页面或清单授权。

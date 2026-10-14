@@ -210,3 +210,18 @@ main/v0.1.3 保存基线提交 91f3432；本轮 feature/spot-readonly-offline �
 审查材料 70 行以内，增量 artifacts/v0.1.3-to-v0.1.4.patch 只给相关代码，不包含整套上游/文档。Git 提交、当前 HEAD 与远端同步以 git log、ls-remote 为准；GitHub Actions 结果独立记录，不能把本地通过当成远端 CI 已通过。
 
 真实 Spot 仍阻塞：官方日志保护/假请求全链路、外部 AI 拒绝工具实测、真实凭据错误路径与只读权限、分类/价格时效与对账/备份边界。Funding/Stocks 未接入，单 Spot 不冒充全账号。下一步仅交 Astra 增量复审，由用户决定后续验收授权。
+
+## v0.1.5 多币 Spot 离线估值（2026-10-14）
+
+- 用户已撤下本轮桌面验收前置条件，要求只推进非桌面开发；没有调用 Windows 桌面工具。v0.1.4/v0.1.5 实际安装与交互均待办，不宣称通过。
+- 本机完整 npm run verify 通过：**74 项测试，0 失败**；类型/构建/ZIP，6 个旧状态及 3 个多币列表编译渲染。新增 9 项行情/多币测试；现有 65 项保留，只调整公开元数据的 mock 契约。
+- 六币种独立手算：BTC 20000、ETH 5000、BNB 5000、SOL 3000、DOGE 100、USDT 4000，共 37100 USDT；非 USDT 回落 20% 损失 6620；BTC 占比 0.539084，HHI=475010000/1376410000≈0.345108。
+- 缺 ETH 报价及无市场 NOPAIR 7：数量保留，32100/5620 仅已定价部分，完整总额 null、2 条缺估值。过期/未来价格不计当前估值；全部过期小计/压力 null，历史仍 37100。
+- exchangeInfo 用明确 baseAsset/quoteAsset/TRADING/Spot allowed；暂停、非 Spot、非 USDT、歧义映射不用，不能猜 symbol。额外/重复/非法价格响应拒绝，缺 ticker 行留缺价；unknown 法律类型不变。
+- 单币/批量 ticker GET 构造无 header/body/签名，最多 100 symbols/批。101 币后批失败保留全部数量，仅计算首批成功范围，不继续请求或伪造完整值。全部通过 mock，没有访问 Binance。
+- 正常零资产、认证故障、限流、断开/在途、重复和 UID 去重由原测试持续覆盖。原 30000 USD/5500 USD 与 24000 USDT/4000 USDT 不回归；USD 缺 FX 仍不可用。
+- 列表列出数量、报价/来源/采集时间、市值、百分比、逐币损失、余额起止与当前/历史状态；失效不显示有效占比。新会话不与旧资产相加，旧备份不扩展。
+- 包 artifacts/wealthfolio-binance-risk-0.1.5.zip；最终 SHA256 **7fba58261c0fe684f21d353afea8314120beeaf3f0548001585731ab2127554b**。README 更新后仅重打包/记录；所有旧 ZIP 原样保留。
+- 修改：src/spot-quotes.ts（新增）、spot.ts、spot-fixture.ts、addon.tsx；tests/spot-quotes.test.ts（新增）、spot.test.ts、scripts/smoke-package.mjs；版本/清单及 README/AGENTS/CURRENT/ARCHITECTURE/GIT-WORKFLOW/VALIDATION。没有重构通用风险/凭据/备份，依赖未升级。
+- 推送仍是既有 Private 的 feature/spot-readonly-offline，main 不变；提交/Actions 以 Git 和 artifacts/CI-RECEIPT-0.1.5.json 为准，本地通过不冒充 CI 或真实客户端。
+- 网络权限未新增，真实发送阻断未改，无真实 Key、私人账户、DeepSeek 变更或 Astra 审计。签名日志/AI 隔离/真实只读权限/真实报价对账和备份仍待验收。公开接口尚无实际连通验证，需用户另行授权。

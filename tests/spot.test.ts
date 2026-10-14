@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { DummyCredentials, DUMMY } from '../src/credentials';
 import { SpotOfflineReader, SpotError, createMockTransport, calibrateTime, publicSpotRequest, spotSnapshot, spotRisk, validateSpotAccount, type MockResponse } from '../src/spot';
-import { spotFixtureTransport, type SpotScenario } from '../src/spot-fixture';
+import { spotFixtureTransport, multiExchangeInfo, type SpotScenario } from '../src/spot-fixture';
 import { syncedFixture, fixtureShocks } from '../src/fixtures';
 import { calculateRisk, type PortfolioState } from '../src/domain';
 import { exportState } from '../src/backup';
@@ -26,6 +26,7 @@ test('Spot GET 固定白名单与实际序列化签名；公开请求不携带�
     assert.equal(request.method,'GET');const url=new URL(request.url);seen.push(url.pathname);
     assert.equal(url.origin,'https://api.binance.com');
     if(url.pathname==='/api/v3/time'){assert.equal(request.headers,undefined);return{status:200,data:{serverTime:TIME+250}};}
+    if(url.pathname==='/api/v3/exchangeInfo'){assert.equal(request.headers,undefined);return{status:200,data:multiExchangeInfo()};}
     if(url.pathname==='/api/v3/account') {
       assert.equal(request.headers?.['X-MBX-APIKEY'],DUMMY[1].apiKey);
       assert.equal(url.searchParams.get('timestamp'),String(TIME+250));
@@ -37,7 +38,7 @@ test('Spot GET 固定白名单与实际序列化签名；公开请求不携带�
     assert.equal(request.headers,undefined);assert.equal(url.search,'?symbol=BTCUSDT');
     return{status:200,data:{symbol:'BTCUSDT',price:'50000'}};
   });
-  await new SpotOfflineReader(c,mock,()=>TIME).sync();assert.deepEqual(seen,['/api/v3/time','/api/v3/account','/api/v3/ticker/price']);
+  await new SpotOfflineReader(c,mock,()=>TIME).sync();assert.deepEqual(seen,['/api/v3/time','/api/v3/account','/api/v3/exchangeInfo','/api/v3/ticker/price']);
   assert.throws(()=>publicSpotRequest('price','BTCUSDT&signature=fake'),SpotError);
   assert.throws(()=>publicSpotRequest('order' as any),SpotError);
 });
@@ -112,6 +113,7 @@ test('Spot 响应错误/重复资产/负数/错误 UID/错误类型拒绝；真�
 test('Spot 账户 UID 改变拒绝替换旧来源；API 权限字段不是读取授权证明',async()=> {
   let uid=42;const t=createMockTransport(async request=> {
     if(new URL(request.url).pathname==='/api/v3/time')return{status:200,data:{serverTime:TIME}};
+    if(new URL(request.url).pathname==='/api/v3/exchangeInfo')return{status:200,data:multiExchangeInfo()};
     if(new URL(request.url).pathname==='/api/v3/account')return{status:200,data:balance([],uid)};
     return{status:500,data:{}};
   });
@@ -129,6 +131,7 @@ test('Spot ticker 错误 symbol/零价格/非十进制拒绝估值；原始附�
     const t=createMockTransport(async request=> {
       const path=new URL(request.url).pathname;
       if(path==='/api/v3/time')return {status:200,data:{serverTime:TIME}};
+      if(path==='/api/v3/exchangeInfo')return {status:200,data:multiExchangeInfo()};
       if(path==='/api/v3/account')return{status:200,data:{...balance(),apiKey:'private-field-must-not-retain'}};
       return{status:200,data:quote};
     });

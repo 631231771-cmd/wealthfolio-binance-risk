@@ -4,9 +4,12 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { applyBatch } from '../src/domain.ts';
 import { emptyState, syncedFixture, DEMO_IDS, FIXTURE_TIME } from '../src/fixtures.ts';
+import { SpotOfflineReader, spotRisk } from '../src/spot.ts';
+import { spotFixtureTransport } from '../src/spot-fixture.ts';
+import { DummyCredentials } from '../src/credentials.ts';
 
 const manifest=JSON.parse(readFileSync(new URL('../manifest.json',import.meta.url),'utf8'));
-const {default:enable}=await import('../dist/addon.js');
+const {default:enable,SpotHoldingsTable}=await import('../dist/addon.js');
 let route;
 await enable({api:{storage:{get:async()=>null},toast:{error:()=>{}}},router:{add:value=>{route=value;}}});
 assert.equal(route.id,manifest.contributes.routes[0].id);
@@ -45,5 +48,21 @@ assert.equal(manifest.network,undefined);
 assert.ok(!/\.network\.request|WRISKDEMO_BTC/.test(bundle));
 assert.ok(html.includes('一个 Binance 账号'));
 assert.ok(html.includes('整个 Binance 总资产不可用'));
+const fakeValues=new Map();
+const credentials=new DummyCredentials({get:async k=>fakeValues.get(k)??null,set:async(k,v)=>fakeValues.set(k,v),delete:async k=>fakeValues.delete(k)});
+await credentials.save(1);
+const now=Date.parse('2026-10-14T00:00:00Z');let scenario='multi';
+const reader=new SpotOfflineReader(credentials,spotFixtureTransport(()=>scenario,()=>now),()=>now);
+for(const value of ['multi','multi-missing']) {
+  scenario=value;await reader.sync();const state=reader.getState(), report=spotRisk(state,now);
+  const rows=renderToStaticMarkup(createElement(SpotHoldingsTable,{state,report}));
+  for(const code of ['BTC','ETH','BNB','SOL','DOGE','USDT'])assert.ok(rows.includes(`Spot / ${code} /`));
+  assert.ok(rows.includes('53.91%') || value==='multi-missing');
+  assert.ok(rows.includes('4000.00000000'));assert.ok(rows.includes('回落 20%'));
+  if(value==='multi-missing'){assert.ok(rows.includes('缺价格'));assert.ok(rows.includes('NOPAIR'));assert.ok(rows.includes('不可用'));}
+}
+const stale=reader.getState();
+const staleRows=renderToStaticMarkup(createElement(SpotHoldingsTable,{state:stale,report:spotRisk(stale,now+60_001)}));
+assert.ok(staleRows.includes('历史失效'));assert.ok(!staleRows.includes('53.91%'));assert.ok(staleRows.includes('Spot / ETH /'));
 assert.ok(!html.includes('导入模拟持仓并读回核对'));assert.ok(html.includes('真实认证请求阻断'));
-console.log('编译入口及 6 种风险状态静态显示通过，路由与清单一致，无浏览器存储或直接 fetch；不是官方桌面安装测试。');
+console.log('编译入口及 6 种旧状态、3 种多币持仓列表显示通过；无新增权限或真实请求，不是官方桌面安装测试。');

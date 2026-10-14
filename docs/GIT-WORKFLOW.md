@@ -4,7 +4,7 @@
 仓库：[631231771-cmd/wealthfolio-binance-risk](https://github.com/631231771-cmd/wealthfolio-binance-risk)，2026-10-14 通过 GitHub API 确认 Private。
 
 - `main` / `v0.1.3`：已验证的旧模拟安全基线；源码基线提交 `91f3432`。
-- `feature/spot-readonly-offline`：v0.1.4 Spot 离线开发。未合入 main；安装包只是本地产物，不发布 Release。
+- `feature/spot-readonly-offline`：v0.1.4 基线 dbdf2cd；现继续 v0.1.5 多币离线开发。未合入 main；安装包只是本地产物，不发布 Release。
 - Git 作者只在本项目设置为 GitHub 用户名与 GitHub noreply 邮箱；不改变全局配置。登录凭据由 gh 原生管理，不写项目。
 
 ## 继续任务

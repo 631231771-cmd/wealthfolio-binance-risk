@@ -1,8 +1,8 @@
 {
   "id": "wealthfolio-binance-risk",
   "name": "币安风险 · 模拟验证",
-  "version": "0.1.4",
-  "description": "Spot 固定响应离线读取、假凭据和风险验证；无网络或主程序资产读写。",
+  "version": "0.1.5",
+  "description": "多币种 Spot 模拟行情估值与风险验证；无网络或主程序资产读写。",
   "author": "个人项目",
   "main": "dist/addon.js",
   "sdkVersion": "3.9.0",

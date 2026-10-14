@@ -1,12 +1,23 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import type { AddonContext, AddonEnableFunction } from '@wealthfolio/addon-sdk';
-import { applyBatch, assetKey, positionKey, calculateRisk, type PortfolioState } from './domain';
+import { applyBatch, assetKey, positionKey, calculateRisk, nonnegative, type PortfolioState } from './domain';
 import { emptyState, syncedFixture, fixtureBatch, fixtureShocks, DEMO_IDS, FIXTURE_TIME } from './fixtures';
 import { exportState, restoreState, sanitizeFixtureState } from './backup';
 import { DummyCredentials } from './credentials';
-import { SpotOfflineReader, spotRisk, SpotError } from './spot';
+import { SpotOfflineReader, spotRisk, spotShock, SpotError } from './spot';
 import { spotFixtureTransport, type SpotScenario } from './spot-fixture';
 import './style.css';
+
+export function SpotHoldingsTable({state,report}:{state:PortfolioState;report:ReturnType<typeof spotRisk>}) {
+  return <table><thead><tr><th>来源／钱包／币种</th><th>数量</th><th>报价 USDT／采集时间</th><th>当前估值 USDT</th><th>占比（已定价范围）</th><th>压力情景／损失 USDT</th><th>余额采集起止／状态</th></tr></thead><tbody>
+    {Object.values(state.snapshots).flatMap(s=>s.positions.map(p=> {
+      const key=assetKey(p.asset), eligible=report.eligiblePositionKeys.includes(positionKey(s.accountId,p.asset));
+      const value=eligible?report.assetValues[key]:undefined, weight=eligible?report.assetWeights[key]:undefined;
+      const shock=spotShock(p.asset.code), loss=value===undefined?'不可用':nonnegative(value).mul(shock).neg().toFixed(8);
+      return <tr key={positionKey(s.accountId,p.asset)}><td>{s.dataMode} / Binance / Spot / {p.asset.code} / {p.asset.type}</td><td>{p.quantity}</td><td>{p.price?`${p.price.value} / ${p.price.asOf} / ${p.price.source}`:'缺价格'}</td><td>{value??'不可用'}</td><td>{weight===undefined?'不可用':`${nonnegative(weight).mul(100).toFixed(2)}%`}</td><td>{p.asset.code==='USDT'?'同币种 0%':'回落 20%'} / {loss}</td><td>{s.collectionStartedAt} 至 {s.collectionEndedAt} / {eligible?'当前可估值':'缺估值或历史失效'}</td></tr>;
+    }))}
+  </tbody></table>;
+}
 
 function SpotPanel({reader,scenario}:{reader:SpotOfflineReader;scenario:{current:SpotScenario}}) {
   const [now,setNow]=useState(Date.now), [busy,setBusy]=useState(false), [message,setMessage]=useState('尚未采集模拟 Spot；先在下方保存固定假凭据。');
@@ -23,17 +34,15 @@ function SpotPanel({reader,scenario}:{reader:SpotOfflineReader;scenario:{current
     <h2>一个 Binance 账号 · Spot 离线读取链路</h2>
     <p>fixture 模拟数据，仅在本页面内存；重开页面需重做采集。Funding 未覆盖，Stocks unsupported，整个 Binance 总资产不可用。计价 USDT，不假定 USDT 等于 USD。</p>
     <label>固定响应情景 <select disabled={busy} onChange={e=>scenario.current=e.target.value as SpotScenario} defaultValue="normal">
-      {(['normal','zero','missing-price','401','403','429','signature','clock','timeout'] as const).map(value=><option key={value} value={value}>{value}</option>)}
+      {(['normal','multi','multi-missing','zero','missing-price','401','403','429','signature','clock','timeout'] as const).map(value=><option key={value} value={value}>{value}</option>)}
     </select></label>
     <button disabled={busy} onClick={sync}>读取模拟 Spot／重复读取</button>
     <button onClick={()=>{reader.disconnect();setNow(Date.now());setMessage('离线读取已断开；保留历史快照。假凭据删除请使用下方专用流程。');}}>断开离线读取</button>
     <p role="status">{message}</p>
-    <p>Spot 当前可估值小计：{amount(report.coveredSubtotal)}；Spot 已定价范围 BTC -20% 情景损失：{amount(report.stressLoss)}。</p>
+    <p>Spot 当前可估值小计：{amount(report.coveredSubtotal)}；Spot 已定价范围非 USDT 资产 -20% 情景损失：{amount(report.stressLoss)}。USDT 以自身单位计价；本情景不覆盖 USDT 兑美元脱锚。</p>
     <p>Spot 覆盖：{report.coverage}；缺估值 {report.unpricedPositionCount} 条；账户集中度 {report.accountHhi??'不可用'}；资产集中度 {report.assetHhi??'不可用'}。</p>
     <p>Spot 最近已知可估值部分：{amount(report.lastKnownSubtotal)}；{report.lastKnownSnapshotTimes.join('、')||'无快照'}。历史结果，不是当前实时资产。</p>
-    <table><thead><tr><th>来源／钱包／资产</th><th>数量</th><th>报价及采集时间</th><th>当前估值 USDT</th><th>占比</th></tr></thead><tbody>
-      {Object.values(state.snapshots).flatMap(s=>s.positions.map(p=><tr key={assetKey(p.asset)}><td>fixture / Binance / Spot / {p.asset.code} / {p.asset.type}</td><td>{p.quantity}</td><td>{p.price?`${p.price.value} / ${p.price.asOf}`:'缺价格'}；余额 {s.collectionStartedAt} 至 {s.collectionEndedAt}</td><td>{report.eligiblePositionKeys.includes(positionKey(s.accountId,p.asset))?report.assetValues[assetKey(p.asset)]:'不可用'}</td><td>{report.assetWeights[assetKey(p.asset)]??'不可用'}</td></tr>))}
-    </tbody></table>
+    <SpotHoldingsTable state={state} report={report}/>
     <ul>{report.issues.map((issue,i)=><li key={i}>{issue}</li>)}</ul>
   </section>;
 }
@@ -59,7 +68,7 @@ function RiskPage({ ctx, initial }: { ctx: AddonContext; initial: PortfolioState
   return <main>
     <h1>币安风险插件 · 最小验证</h1>
     <p className="notice">仅固定模拟数据。报价时间：{FIXTURE_TIME}。Binance Stocks 未支持。请在独立测试资料库使用。</p>
-    <p>v0.1.4 Spot 离线链路：真实认证请求阻断；本版无网络及主程序资产读写权限。固定样例不代表实时余额。</p>
+    <p>v0.1.5 多币种 Spot 离线估值：真实认证请求阻断；本版无网络及主程序资产读写权限。固定样例不代表实时余额。</p>
     <SpotPanel reader={spotReader} scenario={spotScenario}/>
     <h2>历史模拟基准（独立保存，不与 Spot 链路相加）</h2>
     <div className="actions">

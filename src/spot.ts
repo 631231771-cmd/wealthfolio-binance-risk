@@ -1,10 +1,11 @@
 import type { NetworkRequest } from '@wealthfolio/addon-sdk';
 import { buildOfflineReadRequest } from './binance';
 import { DummyCredentials, DUMMY, requestAuthenticated } from './credentials';
+import { parseUsdtMarkets, publicTickerRequest, parseTickerPrices } from './spot-quotes';
 import { applyBatch, assetKey, calculateRisk, DEFAULT_FRESHNESS, nonnegative, validateSnapshot, type Account, type PortfolioState, type Snapshot } from './domain';
 
 // 只读意图白名单。没有可注入的路径、主机、方法或交易参数。
-export const SPOT_PATHS = { time: '/api/v3/time', account: '/api/v3/account', price: '/api/v3/ticker/price' } as const;
+export const SPOT_PATHS = { time: '/api/v3/time', account: '/api/v3/account', price: '/api/v3/ticker/price', exchangeInfo:'/api/v3/exchangeInfo' } as const;
 export type SpotErrorCode = 'auth'|'forbidden'|'rate-limit'|'signature'|'clock'|'timeout'|'network'|'invalid'|'disconnected'|'busy';
 const MESSAGES: Record<SpotErrorCode,string> = {
   auth:'认证或只读权限失败', forbidden:'访问受限或 WAF 拒绝，不自动重试', 'rate-limit':'请求限流，等待冷却后再操作',
@@ -41,8 +42,8 @@ export function calibrateTime(data: unknown, started: number, ended: number): nu
   if (Math.abs(offset)>60_000) throw new SpotError('clock');
   return offset;
 }
-export function publicSpotRequest(kind: 'time'|'price', symbol?: string): NetworkRequest {
-  if (kind!=='time' && kind!=='price' || kind==='price' && (!symbol || !/^[A-Z0-9]{2,40}$/.test(symbol)) || kind==='time' && symbol!==undefined) throw new SpotError('invalid');
+export function publicSpotRequest(kind: 'time'|'price'|'exchangeInfo', symbol?: string): NetworkRequest {
+  if (!['time','price','exchangeInfo'].includes(kind) || kind==='price' && (!symbol || !/^[A-Z0-9]{2,40}$/.test(symbol)) || kind!=='price' && symbol!==undefined) throw new SpotError('invalid');
   return {method:'GET',url:`https://api.binance.com${SPOT_PATHS[kind]}${kind==='price'?'?symbol='+symbol:''}`};
 }
 // 只校验实际使用字段，忽略而不保留上游多余字段；updateTime 是账户更新时间，不冒充余额采集时刻。
@@ -64,17 +65,13 @@ export function spotSnapshot(data: unknown, mode: 'fixture'|'external', startedA
   const body=validateSpotAccount(data), owner=mode==='fixture'?`fixture:${body.uid}`:body.uid;
   const account:Account={id:`${mode}:binance:${body.uid}:spot`,platform:'binance',sourceAccountId:owner,name:mode==='fixture'?'Binance 单账号（离线模拟 Spot）':'Binance Spot',kind:'spot',currency:'USDT'};
   const snapshot:Snapshot={accountId:account.id,batchId:`${mode}:spot:${endedAt}`,asOf:endedAt,collectionStartedAt:startedAt,collectionEndedAt:endedAt,dataMode:mode,
-    positions:body.balances.map(row=>({asset:{venue:'BINANCE',code:row.asset,type:mode==='fixture' && ['BTC','USDT'].includes(row.asset)?'crypto' as const:'unknown' as const,quoteCurrency:'USDT'},quantity:nonnegative(row.free).add(row.locked).toFixed(),balanceComponents:{free:row.free,locked:row.locked}})).filter(p=>p.quantity!=='0')};
+    positions:body.balances.map(row=>({asset:{venue:'BINANCE',code:row.asset,type:mode==='fixture' && ['BTC','ETH','BNB','SOL','USDT'].includes(row.asset)?'crypto' as const:'unknown' as const,quoteCurrency:'USDT'},quantity:nonnegative(row.free).add(row.locked).toFixed(),balanceComponents:{free:row.free,locked:row.locked}})).filter(p=>p.quantity!=='0')};
   validateSnapshot(snapshot); return {account,snapshot};
 }
-function tickerValue(data: unknown, symbol: string): string {
-  const body=data as {symbol?:unknown;price?:unknown};
-  if (!body || body.symbol!==symbol || typeof body.price!=='string' || body.price.length>80) throw new SpotError('invalid');
-  try {const value=nonnegative(body.price); if(value.isZero())throw new Error();return value.toFixed();} catch {throw new SpotError('invalid');}
-}
+export const spotShock=(assetCode:string):string=>assetCode==='USDT'?'0':'-0.2';
 export function spotRisk(state: PortfolioState, now: number, base='USDT') {
   const shocks: Record<string,string>={};
-  for (const s of Object.values(state.snapshots)) for (const p of s.positions) if (p.asset.code==='BTC') shocks[assetKey(p.asset)]='-0.2';
+  for (const s of Object.values(state.snapshots)) for (const p of s.positions) shocks[assetKey(p.asset)]=spotShock(p.asset.code);
   return calculateRisk(state,base,[],shocks,{now:new Date(now).toISOString(),...DEFAULT_FRESHNESS,enforceFixtureFreshness:true});
 }
 
@@ -121,19 +118,22 @@ export class SpotOfflineReader {
       const ended=this.now();
       const {account,snapshot}=spotSnapshot(response.data,'fixture',new Date(started).toISOString(),new Date(ended).toISOString());
       if (this.state.accounts.length && this.state.accounts[0].sourceAccountId!==account.sourceAccountId) throw new SpotError('invalid');
-      for (const p of snapshot.positions) {
-        if (p.asset.code==='USDT') { // 同币种单位换算，不是 USDT=USD 汇率。
-          p.price={value:'1',currency:'USDT',asOf:snapshot.asOf,source:'fixture:同币种计价单位'}; continue;
-        }
-        // 本轮只有已审核 BTC/USDT 报价映射；未知币/代币证券保留缺价，不猜 symbol 或证券分类。
-        if(p.asset.code!=='BTC')continue;
+      for (const p of snapshot.positions) if(p.asset.code==='USDT') p.price={value:'1',currency:'USDT',asOf:snapshot.asOf,source:'fixture:同币种计价单位'};
+      if(snapshot.positions.some(p=>p.asset.code!=='USDT')) {
         try {
-          const quote=await this.request(publicSpotRequest('price','BTCUSDT'),epoch);
-          p.price={value:tickerValue(quote.data,'BTCUSDT'),currency:'USDT',asOf:new Date(this.now()).toISOString(),source:'fixture:模拟 ticker/price（采集时间，非交易所成交时间）'};
+          const info=await this.request(publicSpotRequest('exchangeInfo'),epoch), markets=parseUsdtMarkets(info.data);
+          const symbols=snapshot.positions.flatMap(p=>markets.has(p.asset.code)?[markets.get(p.asset.code)!]:[]);
+          // 最多 100 个 symbols 一批；较大组合不丢资产，也不降级为全市场请求。
+          for(let i=0;i<symbols.length;i+=100) {
+            const requested=symbols.slice(i,i+100);
+            const quote=await this.request(publicTickerRequest(requested),epoch);
+            const prices=parseTickerPrices(quote.data,requested,new Date(this.now()).toISOString(),'fixture');
+            for(const p of snapshot.positions) {const symbol=markets.get(p.asset.code);if(symbol && prices.has(symbol))p.price=prices.get(symbol);}
+          }
         } catch(e) {
           if (e instanceof SpotError && e.code==='rate-limit') {this.cooldownUntil=this.now()+(e.retryAfterSeconds??60)*1000;}
           if (e instanceof SpotError && e.code==='disconnected')throw e;
-          // 独立报价失败保留本次余额，但不继承上次价格。
+          // 行情失败保留数量，未取得的新报价不沿用旧值；先前成功批次明确只属部分覆盖。
         }
       }
       if(epoch!==this.epoch)throw new SpotError('disconnected');
