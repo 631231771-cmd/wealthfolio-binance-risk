@@ -9,3 +9,6 @@ textarea { display: block; width: 100%; min-height: 80px; margin: 8px 0; }
 
 .credential-panel label { display: block; margin: 12px 0; }
 .credential-panel input { display: block; width: min(100%, 520px); box-sizing: border-box; margin-top: 6px; padding: 8px; }
+.direct-panel label { display: block; margin: 10px 0; }
+.direct-panel input:not([type="checkbox"]) { display: block; width: min(100%, 520px); padding: 8px; border: 1px solid #888; border-radius: 4px; margin-top: 4px; }
+.direct-panel input[type="checkbox"] { margin-right: 8px; }

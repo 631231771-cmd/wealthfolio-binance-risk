@@ -3,7 +3,9 @@ import type { AddonContext, AddonEnableFunction } from '@wealthfolio/addon-sdk';
 import { applyBatch, assetKey, positionKey, calculateRisk, nonnegative, type PortfolioState } from './domain';
 import { emptyState, syncedFixture, fixtureBatch, fixtureShocks, DEMO_IDS, FIXTURE_TIME } from './fixtures';
 import { exportState, restoreState, sanitizeFixtureState } from './backup';
-import { DummyCredentials } from './credentials';
+import { DummyCredentials, BinanceCredentials } from './credentials';
+import { DirectSpot } from './direct-spot';
+import { DirectSpotPanel } from './direct-panel';
 import { SpotOfflineReader, spotRisk, spotShock, SpotError } from './spot';
 import { spotFixtureTransport, type SpotScenario } from './spot-fixture';
 import { PublicMarketReader, PublicMarketError, publicMarketRisk } from './public-market';
@@ -71,7 +73,7 @@ function PublicMarketPanel({reader}:{reader:PublicMarketReader}) {
 
 function BridgePanel({quotes}:{quotes:PublicMarketReader}) {
   const bridge=useMemo(()=>new SpotBridge(),[]),input=useRef<HTMLTextAreaElement>(null);
-  const [now,setNow]=useState(Date.now),[message,setMessage]=useState('尚无余额快照；凭据只在独立本地读取器输入，插件不接收Key或Secret。'),[busy,setBusy]=useState(false);
+  const [now,setNow]=useState(Date.now),[message,setMessage]=useState('尚无余额快照；凭据只在独立本地读取器输入，本快照入口不接收Key或Secret。'),[busy,setBusy]=useState(false);
   useEffect(()=>{const t=setInterval(()=>setNow(Date.now()),10_000);return()=>clearInterval(t);},[]);
   const {state,report}=bridge.valued(quotes.getState(),now),mode=Object.values(state.snapshots)[0]?.dataMode;
   const amount=(v:string|null)=>v===null?'不可用':`${v} USDT`;
@@ -87,7 +89,7 @@ function BridgePanel({quotes}:{quotes:PublicMarketReader}) {
   </section>;
 }
 
-function RiskPage({ ctx, initial }: { ctx: AddonContext; initial: PortfolioState }) {
+function RiskPage({ ctx, initial,direct,realCredentials }: { ctx: AddonContext; initial: PortfolioState;direct:DirectSpot;realCredentials:BinanceCredentials }) {
   const [state,setState] = useState(initial), [busy,setBusy] = useState(false), [message,setMessage] = useState('固定模拟基线；没有主程序读写权限');
   const [backup,setBackup] = useState('');
   const credentials=useMemo(()=>new DummyCredentials(ctx.api.secrets),[ctx]);
@@ -109,7 +111,8 @@ function RiskPage({ ctx, initial }: { ctx: AddonContext; initial: PortfolioState
   return <main>
     <h1>币安风险插件 · 最小验证</h1>
     <p className="notice">各区域来源独立：本地读取器快照与旧模拟数据不合计。旧离线报价时间：{FIXTURE_TIME}。Binance Stocks 未支持。请在独立测试资料库使用。</p>
-    <p>v0.1.8 本地只读快照交接；插件真实认证请求阻断，无主程序资产读写权限。真实凭据仅在独立本地读取器输入。</p>
+    <p>v0.1.9 独立小额Spot直接只读连接；首次须本人确认剩余日志风险。无主程序资产读写权限，旧离线入口的真实认证请求阻断保留。</p>
+    <DirectSpotPanel reader={direct} credentials={realCredentials} table={({state,report})=><SpotHoldingsTable state={state} report={report}/>}/>
     <BridgePanel quotes={publicReader}/>
     <PublicMarketPanel reader={publicReader}/>
     <SpotPanel reader={spotReader} scenario={spotScenario}/>
@@ -154,13 +157,17 @@ function RiskPage({ ctx, initial }: { ctx: AddonContext; initial: PortfolioState
 }
 
 const enable: AddonEnableFunction = async ctx => {
+  const network={request:(request:Parameters<AddonContext['api']['network']['request']>[0])=>ctx.api.network.request(request)};
+  const realCredentials=new BinanceCredentials(ctx.api.secrets);
+  const direct=new DirectSpot(realCredentials,network,new PublicMarketReader(network));
+  ctx.onDisable(()=>direct.disconnect());
   let initial = emptyState();
   const saved = await ctx.api.storage.get('fixture-state-v1');
   if (saved) {
     try { initial = restoreState(JSON.stringify({schemaVersion:1,dataMode:'fixture',state:JSON.parse(saved)})); calculateRisk(initial,'USD',[]); }
     catch { ctx.api.toast.error('已有模拟状态格式无效，未将其认定为成功同步'); }
   }
-  const Page = () => <RiskPage ctx={ctx} initial={initial} />;
+  const Page = () => <RiskPage ctx={ctx} initial={initial} direct={direct} realCredentials={realCredentials} />;
   ctx.router.add({ id:'wealthfolio-binance-risk',path:'/addons/wealthfolio-binance-risk',component:Page });
 };
 export default enable;

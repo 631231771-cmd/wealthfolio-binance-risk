@@ -11,12 +11,12 @@ import { DummyCredentials } from '../src/credentials.ts';
 const manifest=JSON.parse(readFileSync(new URL('../manifest.json',import.meta.url),'utf8'));
 const {default:enable,SpotHoldingsTable}=await import('../dist/addon.js');
 let route;
-await enable({api:{storage:{get:async()=>null},toast:{error:()=>{}}},router:{add:value=>{route=value;}}});
+await enable({onDisable:()=>{},api:{storage:{get:async()=>null},toast:{error:()=>{}}},router:{add:value=>{route=value;}}});
 assert.equal(route.id,manifest.contributes.routes[0].id);
 assert.equal(route.path,`/addons/${manifest.id}`);
 const html=renderToStaticMarkup(createElement(route.component));
-assert.equal((html.match(/type="password"/g)??[]).length,0);
-assert.ok(html.includes('插件不接收Key或Secret'));
+assert.equal((html.match(/type="password"/g)??[]).length,2);
+assert.ok(html.includes('本快照入口不接收Key或Secret'));
 assert.ok(html.includes('导入本地余额快照'));
 assert.ok(html.includes('Binance Stocks'));assert.ok(html.includes('unsupported'));
 assert.ok(html.includes('模拟同步'));assert.ok(html.includes('不可用'));
@@ -34,7 +34,7 @@ const cases=[
   [syncedFixture(),'30000.00000000 USD','5500.00000000 USD',FIXTURE_TIME]
 ];
 for (const [state,subtotal,stress,time] of cases) {
-  await enable({api:{storage:{get:async()=>JSON.stringify(state)},toast:{error:()=>assert.fail('有效样例不能恢复失败')}},router:{add:value=>{route=value;}}});
+  await enable({onDisable:()=>{},api:{storage:{get:async()=>JSON.stringify(state)},toast:{error:()=>assert.fail('有效样例不能恢复失败')}},router:{add:value=>{route=value;}}});
   const rendered=renderToStaticMarkup(createElement(route.component));
   assert.ok(rendered.includes(`当前有效且有价格的资产小计：<strong>${subtotal}</strong>`));
   assert.ok(rendered.includes(`当前有效已覆盖范围损失：${stress}`));
@@ -50,7 +50,7 @@ assert.ok(!/\bimport\s*\(/.test(bundle),'入口不得包含动态 import 或同�
 assert.ok(!/\blocalStorage\b|\bsessionStorage\b|\bfetch\s*\(/.test(bundle));
 assert.deepEqual(manifest.permissions.find(p=>p.category==='secrets').functions,['set','get','delete']);
 assert.deepEqual(manifest.permissions.map(p=>p.category),['secrets','files','network']);
-assert.deepEqual(manifest.network,{allowedHosts:['data-api.binance.vision']});
+assert.deepEqual(manifest.network,{allowedHosts:['data-api.binance.vision','api.binance.com']});
 assert.ok(!/WRISKDEMO_BTC/.test(bundle));
 assert.ok(html.includes('真实市场报价 + 模拟持仓'));
 assert.ok(html.includes('数量固定为 BTC'));

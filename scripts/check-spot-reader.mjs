@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {SpotBridge} from '../src/spot-bridge.ts';
-const text=readFileSync(new URL('../artifacts/spot-reader/spot-reader-fixture.json',import.meta.url),'utf8');
+const text=readFileSync(new URL('../artifacts/spot-reader-verification/spot-reader-fixture.json',import.meta.url),'utf8');
 const dto=JSON.parse(text),now=Date.parse(dto.endedAt),bridge=new SpotBridge();
 bridge.importSnapshot(text,now);
 const v=bridge.valued({schemaVersion:1,accounts:[],snapshots:{},statuses:{}},now);

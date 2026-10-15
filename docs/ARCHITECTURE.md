@@ -96,3 +96,11 @@ native/SpotReader.cs是独立Windows进程，只有WinForms、DPAPI及.NET HTTP�
 插件撤下v0.1.7真实凭据输入，保留旧secrets代码/虚构测试回归；权限不扩展，公开行情仍官方代理。UI每10秒重算，不发后台余额请求；只限五个已审核市场，其他资产缺价。JSON的来源标记不是加密身份认证，余额剪贴板仍是资产隐私；Windows同用户恶意进程、调试与OS追踪不在DPAPI/应用固定错误码的保护承诺内。内置AI/DeepSeek配置未变，不以“仅内存”宣称所有AI隐私隔离已经通过。
 
 native/SpotReader.SelfTest.cs只在显式自检时启动临时loopback假服务器，凭据固定虚构、输出fixture，不是产品服务或宿主网络绕过。Windows Actions执行96项插件测试和原生自检，产物全部留在artifacts。运行界面不会开放自定义URL、header、脚本或交易接口。
+
+## v0.1.9 当前主要链路（用户新决定）
+
+保留以上历史方案和备用读取器，不继续扩展EXE。direct-panel.tsx本人本机密码框→既有BinanceCredentials官方secrets候选核验切换→DirectSpot会话明确授权→官方network.request：公开time校准、签名apiRestrictions白名单、签名account→既有spotSnapshot校验UID及十进制数量→独立PublicMarketReader取已授权五个市场→既有赋价/通用风险→独立真实表格。每次先验证Key权限，非只读或缺字段时不查余额；不调用snapshots.save，不复制模拟数量，没有成本/收益字段。不拷贝参考项目实现。
+
+真实secrets与固定dummy键隔离，真实数量/UID/同意和自动开关只在会话内存，不进入storage/备份/日志。每次替换凭据先断开；首次由本人接受签名URL可能进宿主本地日志的剩余风险，不能描述为已修复。旧requestAuthenticated、SpotOfflineReader仍拒绝真实发送；新直接路径单独授权，不把mock transport换成宿主。
+
+DirectSpot负责5分钟间隔、6分钟TTL、单飞、限流及失败退避、epoch防迟到发布；页面只有一个1秒检查/绘制定时器，不是每秒联网。官方3.10.0 detachRoute只hideFrame（iframe尺寸0、visibility hidden），不保证React卸载。因此同时监听document visibilitychange、窗口resize及自身viewport非零，不能只依靠useEffect清理。onDisable断开，重启新会话无同意/自动状态；secrets存在不触发请求。切页/最小化/返回行为仍须以当前宿主实机验收记录为准；SDK不能取消已发请求，超时后pending直到底层结束，不重叠。

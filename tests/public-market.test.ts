@@ -37,9 +37,9 @@ test('公开构造固定HTTPS主机/三个GET；不支持私人路径、URL或�
   assert.throws(()=>publicMarketRequest('price',['BTCUSDT&signature=fake']));
   assert.throws(()=>publicMarketRequest('price',[]));
 });
-test('清单仅增加唯一精确主机网络request，无use或宿主资产权限',()=>{
+test('清单只允许已授权公开主机与直接Spot主机，无use或宿主资产权限',()=>{
   const manifest=JSON.parse(readFileSync('manifest.json','utf8'));
-  assert.deepEqual(manifest.network,{allowedHosts:['data-api.binance.vision']});
+  assert.deepEqual(manifest.network,{allowedHosts:['data-api.binance.vision','api.binance.com']});
   assert.deepEqual(manifest.permissions.map((p:any)=>p.category),['secrets','files','network']);
   assert.deepEqual(manifest.permissions.find((p:any)=>p.category==='network').functions,['request']);
   assert.deepEqual(manifest.permissions.find((p:any)=>p.category==='secrets').functions,['set','get','delete']);

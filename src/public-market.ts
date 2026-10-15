@@ -83,18 +83,18 @@ export function publicMarketRisk(state:PortfolioState,now:number) {
 }
 
 // Merge only fresh public prices; simulated quote quantities never enter the external balance.
-export function mergePublicSpotPrices(account: Account, balance: Snapshot, quoteState: PortfolioState, now: number): Snapshot {
+export function mergePublicSpotPrices(account: Account, balance: Snapshot, quoteState: PortfolioState, now: number, maxAgeMs=PUBLIC_TTL_MS): Snapshot {
   if (!Number.isFinite(now) || account.platform !== 'binance' || account.kind !== 'spot' ||
       !account.sourceAccountId || account.id.startsWith('demo-') || balance.accountId !== account.id ||
       balance.dataMode !== 'external' || !balance.collectionStartedAt || !balance.collectionEndedAt) {
     throw new Error('外部 Spot 余额来源无效');
   }
-  return mergePublicSnapshotPrices(balance,quoteState,now);
+  return mergePublicSnapshotPrices(balance,quoteState,now,maxAgeMs);
 }
 
 // 共用报价赋值；来源标记保持原样，不把辅助程序测试数量变成真实余额。
-export function mergePublicSnapshotPrices(balance: Snapshot, quoteState: PortfolioState, now: number): Snapshot {
-  if(!Number.isFinite(now))throw new Error('估值时间无效');
+export function mergePublicSnapshotPrices(balance: Snapshot, quoteState: PortfolioState, now: number, maxAgeMs=PUBLIC_TTL_MS): Snapshot {
+  if(!Number.isFinite(now)||!Number.isFinite(maxAgeMs)||maxAgeMs<0||maxAgeMs>360_000)throw new Error('估值时间无效');
   validateSnapshot(balance);
   const quoteStatus = quoteState.statuses[ID];
   const quoteSnapshot = quoteState.snapshots[ID];
@@ -106,7 +106,7 @@ export function mergePublicSnapshotPrices(balance: Snapshot, quoteState: Portfol
           position.asset.quoteCurrency !== 'USDT' || !price || price.currency !== 'USDT' ||
           !price.source.startsWith('external:' + PUBLIC_ORIGIN + '/api/v3/ticker/price')) continue;
       const at = Date.parse(price.asOf);
-      if (!Number.isFinite(at) || at > now || now - at > PUBLIC_TTL_MS) continue;
+      if (!Number.isFinite(at) || at > now || now - at > maxAgeMs) continue;
       prices.set(position.asset.code, price);
     }
   }

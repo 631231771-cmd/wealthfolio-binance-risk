@@ -70,7 +70,7 @@ export class BinanceCredentials {
           await this.secrets.set(REAL_ACTIVE, old ?? 'disconnected');
           if (await this.secrets.get(REAL_ACTIVE) !== (old ?? 'disconnected')) throw new Error();
         } catch {
-          throw new Error('本机凭据切换状态无法确认；请检查后重试。认证请求仍被硬阻断');
+          throw new Error('本机凭据切换状态无法确认；请断开后检查并重试');
         }
       }
       if (candidate) {
@@ -78,7 +78,7 @@ export class BinanceCredentials {
           await this.secrets.delete(REAL_SLOTS[candidate]);
           if (await this.secrets.get(REAL_SLOTS[candidate]) !== null) throw new Error();
         } catch {
-          throw new Error('新凭据保存失败，临时凭据清理未确认；请重试。认证请求仍被硬阻断');
+          throw new Error('新凭据保存失败，临时凭据清理未确认；请断开后重试');
         }
       }
       throw new Error('新凭据保存失败；旧版本保持活动。没有发送认证请求');

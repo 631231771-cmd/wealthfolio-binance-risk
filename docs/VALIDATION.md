@@ -354,3 +354,14 @@ main/v0.1.3 保存基线提交 91f3432；本轮 feature/spot-readonly-offline �
 - 完整verify重建ZIP仅容器时间变化，四个内容条目与已安装修正包逐项SHA256一致；交付恢复保留已实机验收原ZIP及原EXE，构建收据重新记录对应哈希。原生源未改，重建自检通过不冒充新二进制GUI实测。
 - 未发送Binance私人认证请求；未启动--allow-live、使用真实Key、修改宿主/DeepSeek/其他资料库。当前目标的虚构端到端路径通过；实际Binance UID/余额/只读与IP权限、原生TLS证书故障、AI隔离仍待验证。真零/部分故障/恶意字段/保存失败目前由自动化覆盖，不能记为本轮全部GUI执行。
 - 重启时宿主仪表盘出现“投资组合更新失败”toast，旧WRISK模拟30000仍显示；本插件无主程序资产权限，本轮未定位该宿主提示，不声称其已解决。没有扩展Funding/Stocks或进行Astra审计。
+
+## v0.1.9 直接只读开发与安装准备（2026-10-15）
+
+- 起点HEAD c5e16eb，工作区干净；在原开发分支继续，无主程序/旧WorldState/依赖框架改动。只参考指定MIT提交82a56aa的binance.ts、run.ts、manifest及许可证，未复制代码。
+- 新增DirectSpot与直接连接表单；复用BinanceCredentials、HMAC、spotSnapshot、Decimal风险与公开行情。api.binance.com精确主机新增；私人GET仅apiRestrictions/account；权限先于余额，IP与只读/额外权限拒绝，UID核对。无主程序账本写入或真实备份。
+- 新增8项测试，累计104/104，覆盖确认门、签名/路径/无公开认证header、权限/UID/缺balances拒绝、真零、5分钟与6分钟TTL、对账门/隐藏暂停/返回补查/断开、故障旧数量/退避/HTML429冷却、SDK超时底层未结束不重叠、暂停后的迟到结果拒绝。旧30000/5500、37100/6620不回归。
+- npm run verify完整通过（104项TS、类型、build/ZIP/smoke/receipt、13项既有原生自检与原生输出→TS导入）。备用EXE被占用导致首次完整命令原生编译失败；改回归构建到spot-reader-verification后重跑通过，未修改或覆盖备用读取器。
+- Windows官方宿主3.10.0，用户在WRISK Windows验收20261013安装0.1.9；管理器/页面已确认。权限页实际看到api.binance.com和data-api.binance.vision都已批准，secrets.set/get/delete、files.openSaveDialog、network.request，无资产/交易权限。
+- 首次加载输入框被宿主样式弱化，补最小边框/排列后再次完整verify通过。修正ZIP SHA256 94b0925460d4aae16990f24c288265b5d209a04312362a4cb1526222d74aacdc；已请求用户重导入，再由本人本机输入/保存密钥；等待期间停止所有桌面观察。
+- **真实API/UID/持仓对账/自动刷新及当前宿主切页、最小化、禁用、重启验收尚未完成。** 没有索取/记录真实Key，没有真实认证请求，也未改DeepSeek/其他资料库。首次风险确认与查询必须由本人点击，不把软件测试记成实际连接。
+- 生命周期源码定点：官方3.10.0 addon-iframe-manager.detachRoute仅hideFrame，隐藏时iframe尺寸0而不保证React卸载；组件据document.visibilityState及自身viewport判断，监听resize/visibilitychange并每秒补查；onDisable断开。此为源码/替身证据，实机仍待验证。

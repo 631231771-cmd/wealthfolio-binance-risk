@@ -1,7 +1,8 @@
 import { mkdirSync,readFileSync,copyFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join,resolve } from 'node:path';
-const root=resolve(import.meta.dirname,'..'),out=join(root,'artifacts','spot-reader');
+// 回归构建不覆盖用户保留/可能正在运行的备用读取器。
+const root=resolve(import.meta.dirname,'..'),out=join(root,'artifacts','spot-reader-verification');
 mkdirSync(out,{recursive:true});
 copyFileSync(join(root,'native','README.md'),join(out,'README.md'));
 const compiler=join(process.env.WINDIR??'C:\\Windows','Microsoft.NET','Framework64','v4.0.30319','csc.exe');
