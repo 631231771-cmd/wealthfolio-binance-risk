@@ -26,6 +26,7 @@
 .connection-notice code { display:block; color:var(--muted); font-size:11px; margin-top:7px; }
 .connection-notice.notice-error { border-left:3px solid #c67b62; }
 .monitor-toolbar { margin-bottom:16px; font-size:12px; }
+.wrisk-app .retry-status { font-size:11px; margin:-7px 0 16px; }
 .button-row { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
 .metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:24px; }
 .metric-card { min-height:123px; padding:18px 18px 16px; border:1px solid var(--line); border-radius:12px; background:var(--surface); min-width:0; }

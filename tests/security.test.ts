@@ -15,6 +15,11 @@ function fakeSecrets() {
       set:async(key:string,value:string)=>{if(key===failKey){failKey='';if(afterWrite)values.set(key,value);throw new Error(value);}values.set(key,value);},
       delete:async(key:string)=>{if(key===failDeleteKey){failDeleteKey='';throw new Error(DUMMY[1].apiKey);}values.delete(key);}}};
 }
+test('页面查询保存状态只读活动标记，不读取任何凭据槽',async()=>{
+ const reads:string[]=[];
+ const c=new BinanceCredentials({get:async key=>{reads.push(key);if(key==='risk-binance-spot-active-v1')return 'a';throw new Error('不得读取槽');},set:async()=>{},delete:async()=>{}});
+ assert.equal(await c.isSaved(),true);assert.deepEqual(reads,['risk-binance-spot-active-v1']);
+});
 test('本机 Binance 凭据只经 secrets 保存、替换、读回和删除；备份不包含值',async()=> {
   const host=fakeSecrets(), c=new BinanceCredentials(host.api);
   const first={version:1 as const,apiKey:'FAKE_API_KEY_WINDOWS',secret:'FAKE_SECRET_WINDOWS'};

@@ -110,3 +110,9 @@ DirectSpot负责5分钟间隔、6分钟TTL、单飞、限流及失败退避、ep
 正式默认页只消费DirectSpot的标准化真实会话和原RiskReport，格式化仅用于展示；未知/缺价/失效不改为零。连接设置使用原secrets/四确认流程，不把凭据值存React状态；连接成功不渲染输入。原模拟模块整体置于默认关闭的原生details内，无新增路由/依赖。details关闭不删除已有状态或持久化键。
 
 DirectSpot新增诊断元数据getter，按既有步骤标记阶段及固定安全码；不改变签名、请求、权限门、同步策略和风险职责。UI只翻译白名单码，未知码显示UNKNOWN而非任意异常。开发区与正式区不共享持仓来源；所有旧回归仍由smoke检查。
+
+## v0.1.10诊断与重试修复
+
+request在受限正文内先解析整数code再分类；DirectRequestError只携带固定SpotError、HTTP状态及整数业务码，无原始响应/请求/cause。非JSON仍按HTTP分类，429/418在底层响应返回时记录独立cooldownUntil，包括SDK超时/epoch失效后的迟到响应。普通failures/due只控制自动退避，disconnect/authorize可清理普通状态，不能清除限流。retry元数据明确区分限流、普通退避、在途、待本人确认、隐藏和可重试；不增加请求端点或自动重试次数。冷却当前仅会话内保存，不保证跨进程延续。
+
+ReadOnlyError只含固定原因和必要已知字段/布尔状态，缺字段不猜false；所有旧权限策略保留。isSaved仅读取非密钥活动标记，未查询时不读Key/Secret槽。价格展示用Decimal完整有效小数，只有市值/损失格式化两位；资产计算与来源隔离不变。

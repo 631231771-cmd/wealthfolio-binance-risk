@@ -9,6 +9,7 @@ const permissions={enableReading:true,ipRestrict:true,enableWithdrawals:false,en
 const ack={risk:true,smallAccount:true,readOnlyPage:true,aiIsolated:true};
 async function harness(timeout=100){
  let now=Date.parse('2026-10-15T00:00:00Z'),calls:string[]=[],mode='ok',release:(()=>void)|undefined,blockedPath='';
+ let privateResponse:NetworkResponse|undefined;
  const values=new Map<string,string>(),credentials=new BinanceCredentials({set:async(k,v)=>{values.set(k,v);},get:async k=>values.get(k)??null,delete:async k=>{values.delete(k);}});
  await credentials.save('TEST_KEY_NOT_REAL','TEST_SECRET_NOT_REAL');
  const network:Pick<NetworkAPI,'request'>={request:async(req):Promise<NetworkResponse>=>{
@@ -17,6 +18,7 @@ async function harness(timeout=100){
   if(u.hostname==='api.binance.com'){assert.ok(['/api/v3/account','/sapi/v1/account/apiRestrictions'].includes(u.pathname));const raw=u.searchParams.get('timestamp')!;assert.equal(u.searchParams.get('signature'),signPayload(`timestamp=${raw}&recvWindow=5000`,'TEST_SECRET_NOT_REAL'));assert.equal(req.headers?.['X-MBX-APIKEY'],'TEST_KEY_NOT_REAL');}
   else assert.equal(req.headers,undefined);
   if(u.pathname===blockedPath)await new Promise<void>(r=>{release=r;});
+  if(privateResponse&&u.hostname==='api.binance.com')return privateResponse;
   if(mode==='network'&&u.hostname==='api.binance.com')throw new Error('TEST_SECRET_NOT_REAL signature=RAW URL '+req.url);
   if(mode==='limit'&&u.hostname==='api.binance.com')return {status:429,headers:{'Retry-After':'3600'},body:'<html>WAF</html>'};
   let body:unknown;
@@ -29,8 +31,76 @@ async function harness(timeout=100){
  }};
  const quotes=new PublicMarketReader(network,()=>now),reader=new DirectSpot(credentials,network,quotes,()=>now,timeout);
  reader.setVisible(true);
- return {reader,calls,credentials,setMode:(m:string)=>{mode=m;},advance:(ms:number)=>{now+=ms;},block:(path:string)=>{blockedPath=path;},release:()=>release?.()};
+ return {reader,calls,credentials,setResponse:(r:NetworkResponse|undefined)=>{privateResponse=r;},setMode:(m:string)=>{mode=m;},advance:(ms:number)=>{now+=ms;},block:(path:string)=>{blockedPath=path;},release:()=>release?.()};
 }
+
+test('HTTP400先解析数字业务码，诊断不含msg、URL或认证信息',async()=>{
+ for(const [exchangeCode,code] of [[-1022,'SPOT_SIGNATURE'],[-1021,'SPOT_CLOCK'],[-2015,'SPOT_AUTH'],[-9999,'SPOT_INVALID']] as const){
+  const h=await harness();h.reader.authorize('1',ack);
+  h.setResponse({status:400,headers:{},body:JSON.stringify({code:exchangeCode,msg:'TEST_SECRET_NOT_REAL https://bad/?signature=RAW'})});
+  await h.reader.sync();const d=h.reader.getDiagnostic();
+  assert.equal(d.code,code);assert.equal((d as any).httpStatus,400);assert.equal((d as any).exchangeCode,exchangeCode);
+  assert.ok(!/TEST_SECRET|signature|https:|msg/.test(JSON.stringify(d)));
+ }
+});
+test('修正普通认证失败后重新确认可重试，不继承旧10分钟退避',async()=>{
+ const h=await harness();h.reader.authorize('1',ack);h.setResponse({status:400,headers:{},body:'{"code":-1022}'});await h.reader.sync();
+ h.reader.disconnect();await h.credentials.save('TEST_KEY_NOT_REAL','TEST_SECRET_NOT_REAL');h.reader.authorize('1',ack);h.setResponse(undefined);
+ await h.reader.sync();assert.equal(h.reader.getStatus().success,true);assert.equal(h.reader.valued().report.coveredSubtotal,'65.00000000');
+});
+test('只读拒绝明确区分缺字段、读取关闭、IP关闭和额外权限',()=>{
+ for(const [value,code] of [[{...permissions,enableReading:false},'READING_DISABLED'],[{...permissions,ipRestrict:false},'IP_ALLOWLIST_DISABLED'],[{...permissions,enableWithdrawals:true},'EXTRA_PERMISSION'],[{...permissions,enableWithdrawals:undefined},'PERMISSION_FIELDS_INCOMPLETE']] as const){
+  assert.throws(()=>assertReadOnly(value),(e:any)=>e.code===code);
+ }
+});
+test('429/418非JSON冷却不被断开、保存、重连或自动开关清除',async()=>{
+ for(const status of [429,418]){
+  const h=await harness();h.reader.authorize('1',ack);await h.reader.sync();h.reader.setAuto(true,true);
+  h.setResponse({status,headers:{'ReTrY-AfTeR':'90'},body:'<html>TEST_SECRET_NOT_REAL signature=RAW</html>'});await h.reader.sync();
+  assert.equal(h.reader.getDiagnostic().httpStatus,status);assert.equal(h.reader.getDiagnostic().code,'SPOT_RATE_LIMIT');
+  const due=h.reader.getStatus().nextDue;h.reader.setAuto(false);h.reader.setAuto(true,true);assert.ok(h.reader.getStatus().nextDue>=due);
+  h.reader.disconnect();await h.credentials.save('TEST_KEY_NOT_REAL','TEST_SECRET_NOT_REAL');h.reader.authorize('1',ack);
+  const count=h.calls.length;assert.equal(h.reader.getStatus().retry.reason,'exchange-limit');assert.equal(h.reader.getStatus().retry.waitSeconds,90);
+  await assert.rejects(h.reader.sync());assert.equal(h.calls.length,count);assert.equal(h.reader.getStatus().nextDue,due);
+  h.advance(89_999);await assert.rejects(h.reader.sync());assert.equal(h.calls.length,count);
+  h.advance(1);h.setResponse(undefined);await h.reader.sync();assert.equal(h.reader.getStatus().success,true);
+ }
+});
+test('普通网络失败保留自动退避，明确断开并重新确认后允许受控重试',async()=>{
+ const h=await harness();h.reader.authorize('1',ack);h.setMode('network');await h.reader.sync();
+ assert.equal(h.reader.getStatus().retry.reason,'backoff');assert.equal(h.reader.getStatus().retry.waitSeconds,600);
+ const count=h.calls.length;await assert.rejects(h.reader.sync(),(e:any)=>e.code==='busy');assert.equal(h.calls.length,count);
+ h.reader.disconnect();assert.equal(h.reader.getStatus().retry.reason,'confirmation-required');h.reader.authorize('1',ack);h.setMode('ok');await h.reader.sync();assert.equal(h.reader.getStatus().success,true);
+});
+test('无可靠Retry-After时429和418保守冷却，超大HTML也不影响限流分类',async()=>{
+ for(const [status,seconds] of [[429,60],[418,1800]]){
+  const h=await harness();h.reader.authorize('1',ack);h.setResponse({status,headers:{'Retry-After':'invalid'},body:'X'.repeat(2*1024*1024+1)});await h.reader.sync();
+  assert.equal(h.reader.getDiagnostic().code,'SPOT_RATE_LIMIT');assert.equal(h.reader.getStatus().retry.waitSeconds,seconds);
+ }
+});
+test('错误响应受字符/UTF8大小限制，非JSON保留HTTP分类且不猜业务码',async()=>{
+ const cases=[
+  {status:403,body:'<html>denied</html>',expected:'SPOT_FORBIDDEN'},
+  {status:500,body:'upstream failed',expected:'SPOT_NETWORK'},
+  {status:400,body:'not-json',expected:'SPOT_INVALID'},
+  {status:400,body:'{"code":"-1022","msg":"TEST_SECRET_NOT_REAL"}',expected:'SPOT_INVALID'},
+  {status:400,body:JSON.stringify({code:-1022,msg:'X'.repeat(2*1024*1024)}),expected:'SPOT_INVALID'},
+  {status:400,body:JSON.stringify({code:-1022,msg:'密'.repeat(800_000)}),expected:'SPOT_INVALID'}
+ ];
+ for(const c of cases){const h=await harness();h.reader.authorize('1',ack);h.setResponse({status:c.status,headers:{},body:c.body});await h.reader.sync();const d=h.reader.getDiagnostic();assert.equal(d.code,c.expected);assert.equal(d.httpStatus,c.status);assert.equal(d.exchangeCode,undefined);assert.ok(JSON.stringify(d).length<250);}
+});
+test('权限诊断只含必要已知字段，不回传未知权限名和完整响应',async()=>{
+ for(const [body,reason,field] of [[{...permissions,enableReading:false},'READING_DISABLED','enableReading'],[{...permissions,ipRestrict:false},'IP_ALLOWLIST_DISABLED','ipRestrict'],[{...permissions,enableWithdrawals:true},'EXTRA_PERMISSION','enableWithdrawals'],[{...permissions,enableWithdrawals:'false'},'PERMISSION_FIELDS_INCOMPLETE','enableWithdrawals'],[{...permissions,'TEST_SECRET_NOT_REAL signature=RAW':true},'EXTRA_PERMISSION',undefined]] as const){
+  const h=await harness();h.reader.authorize('1',ack);h.setResponse({status:200,headers:{},body:JSON.stringify(body)});await h.reader.sync();const d=h.reader.getDiagnostic();
+  assert.equal(d.permissionReason,reason);assert.equal(h.reader.getStatus().connected,false);assert.ok(!h.calls.includes('/api/v3/account'));
+  if(field)assert.equal(d.permissionFields?.[0].field,field);assert.ok(!/TEST_SECRET|signature/.test(JSON.stringify(d)));
+ }
+});
+test('SDK超时和断开后的迟到429仍建立冷却，较长Retry-After不降为60秒',async()=>{
+ const h=await harness(5);h.reader.authorize('1',ack);h.block('/sapi/v1/account/apiRestrictions');h.setResponse({status:429,headers:{'Retry-After':'172800'},body:'not-json'});
+ await h.reader.sync();assert.equal(h.reader.getDiagnostic().code,'SPOT_TIMEOUT');h.reader.disconnect();h.reader.authorize('1',ack);await assert.rejects(h.reader.sync());
+ h.release();await new Promise(r=>setTimeout(r,1));assert.equal(h.reader.getStatus().retry.reason,'exchange-limit');assert.equal(h.reader.getStatus().retry.waitSeconds,172800);await assert.rejects(h.reader.sync());
+});
 test('直接请求只读权限白名单、固定签名构造',()=>{
  assert.doesNotThrow(()=>assertReadOnly(permissions));
  for(const value of [{...permissions,enableWithdrawals:true},{...permissions,enableReading:false},{...permissions,ipRestrict:false},{...permissions,enableNewTrading:true},{enableReading:true}])assert.throws(()=>assertReadOnly(value));

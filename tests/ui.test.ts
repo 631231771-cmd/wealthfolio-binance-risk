@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createElement} from 'react';
 import {createRequire} from 'node:module';
 const {renderToStaticMarkup}=createRequire(import.meta.url)('react-dom/server') as {renderToStaticMarkup:(element:ReturnType<typeof createElement>)=>string};
-import {DirectSpotPanel,describeDiagnostic} from '../src/direct-panel';
+import {DirectSpotPanel,describeDiagnostic,describeRetry,formatPrice} from '../src/direct-panel';
 import type {DirectSpot} from '../src/direct-spot';
 import type {BinanceCredentials} from '../src/credentials';
 import {spotSnapshot,spotShock} from '../src/spot';
@@ -12,7 +12,7 @@ const at='2026-10-15T00:00:00.000Z';
 function render(state:PortfolioState,connected:boolean){
  const shocks=Object.fromEntries(Object.values(state.snapshots).flatMap(s=>s.positions.map(p=>[assetKey(p.asset),spotShock(p.asset.code)])));
  const report=calculateRisk(state,'USDT',[],shocks,{now:at,balanceMaxAgeMs:360000,priceMaxAgeMs:360000,fxMaxAgeMs:360000});
- const reader={valued:()=>({state,report}),getStatus:()=>({connected,busy:false,auto:false,success:connected,nextDue:0,visible:true}),getDiagnostic:()=>({stage:connected?'complete':'idle',code:connected?'OK':'NOT_CONNECTED'})} as unknown as DirectSpot;
+ const reader={valued:()=>({state,report}),getStatus:()=>({connected,busy:false,auto:false,success:connected,nextDue:0,visible:true,retry:{canRetry:connected,reason:connected?'ready':'confirmation-required',waitSeconds:0}}),getDiagnostic:()=>({stage:connected?'complete':'idle',code:connected?'OK':'NOT_CONNECTED'})} as unknown as DirectSpot;
  return renderToStaticMarkup(createElement(DirectSpotPanel,{reader,credentials:{} as BinanceCredentials}));
 }
 function sample(){const {account,snapshot}=spotSnapshot({uid:1,accountType:'SPOT',balances:[{asset:'BTC',free:'0.001',locked:'0'},{asset:'USDT',free:'15',locked:'0'},{asset:'NOPAIR',free:'2',locked:'0'}]},'external',at,at);for(const p of snapshot.positions)if(p.asset.code!=='NOPAIR')p.price={value:p.asset.code==='BTC'?'50000':'1',currency:'USDT',asOf:at,source:'external:test'};return {schemaVersion:1 as const,accounts:[account],snapshots:{[account.id]:snapshot},statuses:{[account.id]:{state:'ready' as const,attemptedAt:at}}};}
@@ -29,6 +29,19 @@ test('真实持仓简表不混入开发样例，成功连接不渲染凭据输�
 test('界面区分有效零和失效历史，不显示失效资产为0',()=>{
  const state=sample();state.snapshots[state.accounts[0].id].positions=[];assert.ok(render(state,true).includes('本次成功快照余额为零。'));assert.ok(render(state,true).includes('0.00'));
  const stale=sample();stale.statuses[stale.accounts[0].id].state='failed' as any;const html=render(stale,false);assert.ok(html.includes('保留上次持仓'));assert.ok(html.includes('历史失效'));assert.ok(html.includes('aria-label="不可用"'));
+});
+test('小额非零报价显示实际精度，市值仍保留两位',()=>{
+ const state=sample();state.snapshots[state.accounts[0].id].positions[0].price!.value='0.000000012345';
+ const html=render(state,true);assert.ok(html.includes('0.000000012345'));assert.ok(html.includes('15.00'));
+});
+test('报价保留有效小数，重试原因与安全元数据不透传任意内容',()=>{
+ for(const value of ['0.00000001','0.000000000000000000000000001','0.12345678','12345.6789'])assert.equal(formatPrice(value),value);
+ assert.equal(formatPrice('0.00'),'0');
+ assert.match(describeRetry({canRetry:false,reason:'exchange-limit',waitSeconds:90}),/交易所限流.*90秒/);
+ assert.match(describeRetry({canRetry:false,reason:'backoff',waitSeconds:600}),/普通失败退避/);
+ assert.match(describeRetry({canRetry:false,reason:'confirmation-required',waitSeconds:0}),/本人/);
+ const detail=describeDiagnostic({stage:'permissions',code:'READ_ONLY_REJECTED',httpStatus:400,exchangeCode:-1022,permissionReason:'IP_ALLOWLIST_DISABLED',permissionFields:[{field:'ipRestrict',value:false},{field:'signature=SECRET',value:true}]});
+ assert.ok(detail.text.includes('未启用IP白名单'));assert.equal(detail.metadata,'HTTP 400 · Binance -1022 · ipRestrict=false');assert.ok(!JSON.stringify(detail).includes('SECRET'));
 });
 test('错误阶段与安全码明确区分，未知码不透传任意文本',()=>{
  const cases=[['permissions','READ_ONLY_REJECTED','只读权限'],['identity','UID_MISMATCH','UID'],['balance','SPOT_TIMEOUT','超时'],['disconnected','USER_DISCONNECTED','断开']] as const;

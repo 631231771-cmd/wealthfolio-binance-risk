@@ -42,7 +42,13 @@ export class BinanceCredentials {
   }
 
   async isSaved(): Promise<boolean> {
-    return (await this.read()) !== null;
+    // 页面只查活动标记，不为显示“已保存”读取Key/Secret；完整槽核验留给本人查询。
+    try {
+      const active=await this.secrets.get(REAL_ACTIVE);
+      if(active===null||active==='disconnected')return false;
+      if(active==='a'||active==='b')return true;
+    } catch {}
+    throw new Error('本机凭据状态未知；未读取凭据内容');
   }
 
   async save(apiKey: string, secret: string): Promise<void> {
