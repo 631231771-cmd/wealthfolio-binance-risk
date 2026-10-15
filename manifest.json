@@ -1,8 +1,8 @@
 {
   "id": "wealthfolio-binance-risk",
   "name": "币安风险 · 模拟验证",
-  "version": "0.1.5",
-  "description": "多币种 Spot 模拟行情估值与风险验证；无网络或主程序资产读写。",
+  "version": "0.1.6",
+  "description": "真实公开行情与模拟持仓估值；私人认证保持阻断，无主程序资产权限。",
   "author": "个人项目",
   "main": "dist/addon.js",
   "sdkVersion": "3.9.0",
@@ -46,6 +46,18 @@
         "openSaveDialog"
       ],
       "purpose": "导出严格白名单的固定模拟状态"
+    },
+    {
+      "category": "network",
+      "functions": [
+        "request"
+      ],
+      "purpose": "只读取指定官方主机的time、exchangeInfo及ticker公开GET；不读取凭据或账户"
     }
-  ]
+  ],
+  "network": {
+    "allowedHosts": [
+      "data-api.binance.vision"
+    ]
+  }
 }

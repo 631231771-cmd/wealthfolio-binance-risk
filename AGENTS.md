@@ -10,7 +10,7 @@
 
 ## 不可破坏的边界
 
-- 本阶段只有固定模拟数据；真实连接、定时同步、新仓位模拟和券商接入都未实现。不得把计划描述成完成。
+- 本阶段持仓数量只有固定模拟数据；v0.1.6允许唯一主机的公开行情，私人账户连接、定时同步、新仓位模拟和券商接入仍未实现。不得把公开价格当成真实持仓。
 - 股票保持 `unsupported`，没有完整只读持仓和现金证据时不能生成成功的证券快照；成交历史不是持仓。
 - 不下单、提现、签交易、划转；不申请真实密钥；不上传资产、凭据和导出文件。
 - 真实密钥只能考虑官方 `secrets`；禁止普通 storage、localStorage/sessionStorage、日志、源码、Git 或 AI 提示保存密钥。v0.1.3 仅以 secrets.set/get/delete 验证固定假凭据，不请求 use 或接受真实输入。候选槽读回后切换；删除失败须告知，不宣称卸载会撤销交易所密钥。
@@ -32,6 +32,8 @@ v0.1.4 SpotOfflineReader 只接受固定假凭据和工厂 mock transport；标�
 Git 接力先看最近提交和相关差异，按 docs/GIT-WORKFLOW.md 操作。main/v0.1.3 保留旧基线，开发分支 feature/spot-readonly-offline；Private 也不得上传个人数据。只有当轮授权才提交/推送，不强推或自动合并。精简审查材料不超过 200 行。
 
 v0.1.5 多币报价只基于模拟 exchangeInfo 明确映射与 ticker，不能猜 symbol、价格、美元汇率或资产法律类型。单批最多 100 symbols；缺行/后批失败保留未定价数量，明确部分覆盖。新增构造代码不是网络授权，当前无真实公开/私人请求。桌面中断只停止桌面操作；用户继续授权非桌面开发时可推进，不得自行恢复桌面控制或将待办说成通过。
+
+v0.1.6仅公开行情已授权：官方network.request、精确data-api.binance.vision、GET time/exchangeInfo/ticker/price。不得扩大主机/路径、带header/body/auth或将离线签名传输换为真实代理。PublicMarketReader只接收network.request能力，没有secrets能力；fixture数量与external报价明确分别标记，混合样例只在内存，不进入旧模拟备份。宿主限制主机但不限制方法/路径；本模块固定构造。SDK无取消API，超时后仍等待底层请求结束再允许重试，断开后的迟到结果不发布。模拟断网按钮不是实际操作系统断网或原生网络故障证明。
 
 执行 `npm run verify`，类型、风险、同步故障、签名、宿主调用契约和包入口检查都必须通过。SDK 替身、静态渲染、编译成功不能当作实际桌面安装成功。需要实际运行的检查按 `docs/WINDOWS-ACCEPTANCE.md` 记录结果与版本。
 

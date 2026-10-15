@@ -2,7 +2,7 @@
 
 v0.1.5 增量：spot-quotes.ts 解析模拟 exchangeInfo → 明确的资产/USDT 市场映射 → 单币/100 symbols 分批 ticker GET 构造 → 标准 Price。只有 TRADING 且 Spot allowed 的唯一 USDT 市场可用；非 USDT/停牌/歧义/缺价保留缺口，不截后缀猜身份。ticker 无成交时间，Price.asOf 是采集时刻，沿用 120 秒 TTL；USD 转换仍需独立 FX，本版没有。
 
-SpotOfflineReader 继续仅 mock；新行情构造不读取 secrets，不持有 ctx.api.network，不增加权限。非 USDT -20% / USDT 同币种 0% 是明确测试情景，未知法律类型不伪装普通币或真实 Stocks。SpotHoldingsTable 直接用风险报告的 eligiblePositionKeys 显示当前金额/权重/损失，过期或缺价行仍显示数量和历史报价。旧基准与新会话隔离，备份不扩展。本轮未控制桌面，v0.1.4/v0.1.5 桌面验收待办；下文保留历史版本边界。
+SpotOfflineReader 继续仅 mock，不持有 ctx.api.network。v0.1.6 单独公开行情模块见文末，不改变离线认证传输。非 USDT -20% / USDT 同币种 0% 是明确测试情景，未知法律类型不伪装普通币或真实 Stocks。SpotHoldingsTable 直接用风险报告的 eligiblePositionKeys 显示当前金额/权重/损失，过期或缺价行仍显示数量和历史报价。旧基准与新会话隔离，备份不扩展。v0.1.5 已完成 Windows 验收，v0.1.4 自身未复验；各版本以 VALIDATION 最新节为准，下文保留历史边界。
 
 ## 模块与数据流
 
@@ -73,3 +73,10 @@ enforceFixtureFreshness 只给新模拟链路增加时效检查，不给 externa
 新 Spot 会话不持久化、不导出，现有白名单只备份旧模拟基准。页面每 10 秒重算，不采集；删除假凭据按钮先调用 disconnect。没有改变 SDK/依赖、主程序数据库、旧资产或 AI 配置。
 
 A 股以后添加官方连接器或 CSV 标准化入口即可复用风险函数；具体券商权限/持仓接口仍需单独调查。现在没有券商代码或复杂抽象。主程序升级可能改变 SDK 签名、权限检测、宿主 React 版本、路由、快照日期规则或备份范围；按固定版本重新验收，不自动跟随最新版本。
+## v0.1.6 公开行情增量
+
+src/public-market.ts 独立接收SDK network.request能力，不接收ctx/secrets/认证读取器。只构造指定主机三个公开GET，exchangeInfo限定五个市场避免2MiB宿主响应限制；复用spot-quotes映射与十进制价格校验。body字符串有限长度JSON解析，状态/限流/固定错误分类；无直连fetch、后台请求或服务器。
+
+数据流：手动刷新→time→exchangeInfo→ticker/price→external来源/采集时间报价→fixture固定数量快照→通用风险纯函数。采集起止是报价请求时间，不是私人余额采集时间；表头明确区分。120秒过期、失败/断开不发布当前值；历史报价仅作历史参考。缺行不沿用上次价格，保留模拟数量并显示partial。USDT1只是同币计价，不建立USD汇率。
+
+状态仅内存，卸载页面断开；不写主程序/storage/旧备份。SDK没有AbortSignal，15秒UI超时后仍阻止重叠请求直到宿主promise结束；断开epoch拒绝迟到结果。仅允许手动重试。宿主精确批准主机/HTTPS/禁止重定向；插件固定GET/路径，不能说宿主权限也限制了路径。证据见 PUBLIC-MARKET-PREP；模拟断网不是 OS 或原生网络故障验收。

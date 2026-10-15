@@ -6,10 +6,11 @@ import { exportState, restoreState, sanitizeFixtureState } from './backup';
 import { DummyCredentials } from './credentials';
 import { SpotOfflineReader, spotRisk, spotShock, SpotError } from './spot';
 import { spotFixtureTransport, type SpotScenario } from './spot-fixture';
+import { PublicMarketReader, PublicMarketError, publicMarketRisk } from './public-market';
 import './style.css';
 
-export function SpotHoldingsTable({state,report}:{state:PortfolioState;report:ReturnType<typeof spotRisk>}) {
-  return <table><thead><tr><th>来源／钱包／币种</th><th>数量</th><th>报价 USDT／采集时间</th><th>当前估值 USDT</th><th>占比（已定价范围）</th><th>压力情景／损失 USDT</th><th>余额采集起止／状态</th></tr></thead><tbody>
+export function SpotHoldingsTable({state,report,publicQuotes=false}:{state:PortfolioState;report:ReturnType<typeof spotRisk>;publicQuotes?:boolean}) {
+  return <table><thead><tr><th>来源／钱包／币种</th><th>数量</th><th>报价 USDT／采集时间</th><th>当前估值 USDT</th><th>占比（已定价范围）</th><th>压力情景／损失 USDT</th><th>{publicQuotes?'报价请求起止／模拟数量估值状态':'余额采集起止／状态'}</th></tr></thead><tbody>
     {Object.values(state.snapshots).flatMap(s=>s.positions.map(p=> {
       const key=assetKey(p.asset), eligible=report.eligiblePositionKeys.includes(positionKey(s.accountId,p.asset));
       const value=eligible?report.assetValues[key]:undefined, weight=eligible?report.assetWeights[key]:undefined;
@@ -47,12 +48,33 @@ function SpotPanel({reader,scenario}:{reader:SpotOfflineReader;scenario:{current
   </section>;
 }
 
+function PublicMarketPanel({reader}:{reader:PublicMarketReader}) {
+  const [now,setNow]=useState(Date.now),[busy,setBusy]=useState(false),[message,setMessage]=useState('未请求公开行情；无需任何凭据。');
+  useEffect(()=>{const timer=setInterval(()=>setNow(Date.now()),10_000);return()=>{clearInterval(timer);reader.disconnect();};},[reader]);
+  const state=reader.getState(), report=publicMarketRisk(state,now),amount=(value:string|null)=>value===null?'不可用':`${value} USDT`;
+  const refresh=async()=>{setBusy(true);try{await reader.refresh();setMessage('真实公开行情已读取；仅模拟数量，未查询账户。');}catch(e){setMessage(e instanceof PublicMarketError?e.message:'公开行情失败');}finally{setNow(Date.now());setBusy(false);}};
+  return <section><h2>真实市场报价 + 模拟持仓</h2>
+    <p>仅 data-api.binance.vision 的公开 GET；不读取或发送 API Key、Secret、签名。数量固定为 BTC 0.4、ETH 2、BNB 10、SOL 20、DOGE 1000、USDT 4000，不是真实账户资产，也不与其他样例相加。行情仅本页面内存，不写入主程序或备份。</p>
+    <button disabled={busy} onClick={refresh}>刷新真实公开行情</button>
+    <button onClick={()=>{reader.disconnect();setNow(Date.now());setMessage('公开行情已断开；历史价格保留，当前不可用。');}}>断开公开行情</button>
+    <button disabled={busy} onClick={()=>{reader.simulateNetworkFailure();setNow(Date.now());setMessage('已模拟网络失败（未发送请求、未改变系统网络）；当前不可用，旧报价仅供历史参考。');}}>模拟公开行情断网（不发送）</button>
+    <p role="status">{message}</p>
+    <p>模拟数量按当前报价估值：{amount(report.coveredSubtotal)}；非 USDT -20% 情景损失：{amount(report.stressLoss)}；覆盖 {report.coverage}；缺估值 {report.unpricedPositionCount} 条。</p>
+    <p>采集时间（不是成交时间）：{report.lastKnownSnapshotTimes.join('、')||'未采集'}；最近一次服务器时间响应：{reader.getServerTime()??'未获取'}；报价有效期 120 秒，最多延迟 10 秒刷新过期显示。USDT 以自身单位计价，不假定 USD 平价。</p>
+    <p>历史已知模拟估值：{amount(report.lastKnownSubtotal)}；历史价格不代表当前行情。{report.lastKnownPartial?'历史仅为可定价部分。':''}</p>
+    {reader.getCooldownUntil()>now && <p>冷却至 {new Date(reader.getCooldownUntil()).toISOString()}；无自动重试。</p>}
+    <SpotHoldingsTable state={state} report={report} publicQuotes/>
+    <ul>{report.issues.map((issue,i)=><li key={i}>{issue}</li>)}</ul>
+  </section>;
+}
+
 function RiskPage({ ctx, initial }: { ctx: AddonContext; initial: PortfolioState }) {
   const [state,setState] = useState(initial), [busy,setBusy] = useState(false), [message,setMessage] = useState('固定模拟基线；没有主程序读写权限');
   const [backup,setBackup] = useState('');
   const credentials=useMemo(()=>new DummyCredentials(ctx.api.secrets),[ctx]);
   const spotScenario=useRef<SpotScenario>('normal');
   const spotReader=useMemo(()=>new SpotOfflineReader(credentials,spotFixtureTransport(()=>spotScenario.current)),[credentials]);
+  const publicReader=useMemo(()=>new PublicMarketReader({request:request=>ctx.api.network.request(request)}),[ctx]);
   const report = calculateRisk(state,'USD',[],fixtureShocks());
   const amount = (value: string | null) => value === null ? '不可用' : `${value} USD`;
   const run = async (work: () => Promise<string>) => {
@@ -67,8 +89,9 @@ function RiskPage({ ctx, initial }: { ctx: AddonContext; initial: PortfolioState
   };
   return <main>
     <h1>币安风险插件 · 最小验证</h1>
-    <p className="notice">仅固定模拟数据。报价时间：{FIXTURE_TIME}。Binance Stocks 未支持。请在独立测试资料库使用。</p>
-    <p>v0.1.5 多币种 Spot 离线估值：真实认证请求阻断；本版无网络及主程序资产读写权限。固定样例不代表实时余额。</p>
+    <p className="notice">全部持仓数量均为模拟。旧离线报价时间：{FIXTURE_TIME}。Binance Stocks 未支持。请在独立测试资料库使用。</p>
+    <p>v0.1.6 公开行情：仅指定主机的公开请求；真实认证请求阻断，无主程序资产读写权限。样例不代表实时余额。</p>
+    <PublicMarketPanel reader={publicReader}/>
     <SpotPanel reader={spotReader} scenario={spotScenario}/>
     <h2>历史模拟基准（独立保存，不与 Spot 链路相加）</h2>
     <div className="actions">
