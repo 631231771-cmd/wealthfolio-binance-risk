@@ -43,7 +43,7 @@ test('必须本人确认；权限先于余额；真实来源、缺价与重复�
  for(let i=0;i<2;i++){await h.reader.sync();const v=h.reader.valued();assert.equal(v.report.coveredSubtotal,'65.00000000');assert.equal(v.report.stressLoss,'10.00000000');assert.equal(v.report.total,null);assert.equal(v.report.unpricedPositionCount,1);assert.equal(Object.values(v.state.snapshots)[0].dataMode,'external');assert.equal(Object.values(v.state.snapshots)[0].positions.length,3);}
 });
 test('额外权限/错误UID/缺余额停止，不能降级为成功空资产',async()=>{
- for(const mode of ['trade','uid','missing']){const h=await harness();h.reader.authorize('1',ack);h.setMode(mode);await h.reader.sync();assert.equal(h.reader.getStatus().connected,false);assert.equal(h.reader.valued().report.coveredSubtotal,null);if(mode==='trade')assert.ok(!h.calls.includes('/api/v3/account'));}
+ for(const mode of ['trade','uid','missing']){const h=await harness();h.reader.authorize('1',ack);h.setMode(mode);await h.reader.sync();assert.equal(h.reader.getStatus().connected,false);assert.equal(h.reader.valued().report.coveredSubtotal,null);assert.equal(h.reader.getDiagnostic().code,{trade:'READ_ONLY_REJECTED',uid:'UID_MISMATCH',missing:'SPOT_INVALID'}[mode]);if(mode==='trade')assert.ok(!h.calls.includes('/api/v3/account'));}
 });
 test('真零、6分钟TTL与5分钟刷新一致',async()=>{
  const h=await harness();h.reader.authorize('1',ack);h.setMode('zero');await h.reader.sync();assert.equal(h.reader.valued().report.total,'0.00000000');
@@ -60,7 +60,7 @@ test('失败保留旧数量/当前不可用、固定错误、退避及429不能�
  h.advance(DIRECT_INTERVAL+1);h.setMode('limit');await h.reader.tick();const due=h.reader.getStatus().nextDue;h.reader.setAuto(false);h.reader.setAuto(true,true);assert.equal(h.reader.getStatus().nextDue,due);
 });
 test('SDK超时后底层未结束不重叠，断开后迟到结果不发布',async()=>{
- const h=await harness(5);h.reader.authorize('1',ack);h.block('/api/v3/account');await h.reader.sync();assert.equal(h.reader.getStatus().busy,true);await assert.rejects(h.reader.sync());h.reader.disconnect();h.release();await new Promise(r=>setTimeout(r,1));assert.equal(h.reader.getStatus().busy,false);assert.equal(h.reader.getState().accounts.length,0);
+ const h=await harness(5);h.reader.authorize('1',ack);h.block('/api/v3/account');await h.reader.sync();assert.equal(h.reader.getDiagnostic().code,'SPOT_TIMEOUT');assert.equal(h.reader.getDiagnostic().stage,'balance');assert.equal(h.reader.getStatus().busy,true);await assert.rejects(h.reader.sync());h.reader.disconnect();h.release();await new Promise(r=>setTimeout(r,1));assert.equal(h.reader.getStatus().busy,false);assert.equal(h.reader.getState().accounts.length,0);assert.equal(h.reader.getDiagnostic().code,'USER_DISCONNECTED');
 });
 test('页面暂停时在途结果丢弃，不能发后续认证或发布余额',async()=>{
  const h=await harness();h.reader.authorize('1',ack);h.block('/sapi/v1/account/apiRestrictions');const task=h.reader.sync();while(h.calls.length<2)await new Promise(r=>setTimeout(r,1));h.reader.setVisible(false);h.release();await task;assert.ok(!h.calls.includes('/api/v3/account'));assert.equal(h.reader.getState().accounts.length,0);

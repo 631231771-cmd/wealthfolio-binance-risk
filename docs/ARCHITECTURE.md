@@ -104,3 +104,9 @@ native/SpotReader.SelfTest.cs只在显式自检时启动临时loopback假服务�
 真实secrets与固定dummy键隔离，真实数量/UID/同意和自动开关只在会话内存，不进入storage/备份/日志。每次替换凭据先断开；首次由本人接受签名URL可能进宿主本地日志的剩余风险，不能描述为已修复。旧requestAuthenticated、SpotOfflineReader仍拒绝真实发送；新直接路径单独授权，不把mock transport换成宿主。
 
 DirectSpot负责5分钟间隔、6分钟TTL、单飞、限流及失败退避、epoch防迟到发布；页面只有一个1秒检查/绘制定时器，不是每秒联网。官方3.10.0 detachRoute只hideFrame（iframe尺寸0、visibility hidden），不保证React卸载。因此同时监听document visibilitychange、窗口resize及自身viewport非零，不能只依靠useEffect清理。onDisable断开，重启新会话无同意/自动状态；secrets存在不触发请求。切页/最小化/返回行为仍须以当前宿主实机验收记录为准；SDK不能取消已发请求，超时后pending直到底层结束，不重叠。
+
+## v0.1.9界面分区
+
+正式默认页只消费DirectSpot的标准化真实会话和原RiskReport，格式化仅用于展示；未知/缺价/失效不改为零。连接设置使用原secrets/四确认流程，不把凭据值存React状态；连接成功不渲染输入。原模拟模块整体置于默认关闭的原生details内，无新增路由/依赖。details关闭不删除已有状态或持久化键。
+
+DirectSpot新增诊断元数据getter，按既有步骤标记阶段及固定安全码；不改变签名、请求、权限门、同步策略和风险职责。UI只翻译白名单码，未知码显示UNKNOWN而非任意异常。开发区与正式区不共享持仓来源；所有旧回归仍由smoke检查。

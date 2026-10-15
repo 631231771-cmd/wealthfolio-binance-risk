@@ -108,11 +108,11 @@ function RiskPage({ ctx, initial,direct,realCredentials }: { ctx: AddonContext; 
     setState(safe);
     return '模拟状态已替换并持久化；没有查询真实账户。';
   };
-  return <main>
-    <h1>币安风险插件 · 最小验证</h1>
-    <p className="notice">各区域来源独立：本地读取器快照与旧模拟数据不合计。旧离线报价时间：{FIXTURE_TIME}。Binance Stocks 未支持。请在独立测试资料库使用。</p>
-    <p>v0.1.9 独立小额Spot直接只读连接；首次须本人确认剩余日志风险。无主程序资产读写权限，旧离线入口的真实认证请求阻断保留。</p>
-    <DirectSpotPanel reader={direct} credentials={realCredentials} table={({state,report})=><SpotHoldingsTable state={state} report={report}/>}/>
+  return <main className="wrisk-app">
+    <DirectSpotPanel reader={direct} credentials={realCredentials}/>
+    <details className="dev-tools"><summary>开发与测试</summary><div className="dev-tools-content">
+    <h2>开发与测试 · 非真实资产总览</h2>
+    <p className="notice">以下旧功能独立保留，不计入上方真实Spot统计。旧离线入口真实认证请求阻断保留。旧样例时钟：{FIXTURE_TIME}；Stocks未支持。</p>
     <BridgePanel quotes={publicReader}/>
     <PublicMarketPanel reader={publicReader}/>
     <SpotPanel reader={spotReader} scenario={spotScenario}/>
@@ -153,6 +153,7 @@ function RiskPage({ ctx, initial,direct,realCredentials }: { ctx: AddonContext; 
     <p role="status">{message}</p>
     <label>粘贴已导出的模拟 JSON（不含凭据）<textarea value={backup} onChange={e=>setBackup(e.target.value)} /></label>
     <button disabled={busy} onClick={() => run(async () => {const restored=restoreState(backup); calculateRisk(restored,'USD',[],fixtureShocks()); return save(restored);})}>恢复插件模拟状态（不自动写主程序）</button>
+    </div></details>
   </main>;
 }
 

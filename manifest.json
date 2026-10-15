@@ -1,6 +1,6 @@
 {
   "id": "wealthfolio-binance-risk",
-  "name": "币安风险 · 模拟验证",
+  "name": "币安资产监控",
   "version": "0.1.9",
   "description": "独立小额Spot直接只读同步；本人确认日志剩余风险，自动刷新仅页面可见时运行。",
   "author": "个人项目",
@@ -19,7 +19,7 @@
         {
           "id": "wealthfolio-binance-risk",
           "route": "wealthfolio-binance-risk",
-          "label": "币安风险 · 模拟",
+          "label": "币安资产监控",
           "icon": "squares-four",
           "order": 100
         }
