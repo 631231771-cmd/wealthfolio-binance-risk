@@ -1,6 +1,6 @@
 {
   "name": "wealthfolio-binance-risk",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,8 @@
     "package": "node scripts/package.mjs",
     "smoke": "node --import tsx scripts/smoke-package.mjs",
     "receipt": "node scripts/receipt.mjs",
-    "verify": "npm run typecheck && npm test && npm run build && npm run package && npm run smoke && npm run receipt"
+    "verify": "npm run typecheck && npm test && npm run build && npm run package && npm run smoke && npm run receipt && npm run verify:reader",
+    "verify:reader": "node scripts/build-spot-reader.mjs && node --import tsx scripts/check-spot-reader.mjs"
   },
   "dependencies": {
     "@noble/hashes": "2.0.1",

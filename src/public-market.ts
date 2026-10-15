@@ -89,6 +89,13 @@ export function mergePublicSpotPrices(account: Account, balance: Snapshot, quote
       balance.dataMode !== 'external' || !balance.collectionStartedAt || !balance.collectionEndedAt) {
     throw new Error('外部 Spot 余额来源无效');
   }
+  return mergePublicSnapshotPrices(balance,quoteState,now);
+}
+
+// 共用报价赋值；来源标记保持原样，不把辅助程序测试数量变成真实余额。
+export function mergePublicSnapshotPrices(balance: Snapshot, quoteState: PortfolioState, now: number): Snapshot {
+  if(!Number.isFinite(now))throw new Error('估值时间无效');
+  validateSnapshot(balance);
   const quoteStatus = quoteState.statuses[ID];
   const quoteSnapshot = quoteState.snapshots[ID];
   const prices = new Map<string, NonNullable<Snapshot['positions'][number]['price']>>();

@@ -3,10 +3,11 @@ import type { AddonContext, AddonEnableFunction } from '@wealthfolio/addon-sdk';
 import { applyBatch, assetKey, positionKey, calculateRisk, nonnegative, type PortfolioState } from './domain';
 import { emptyState, syncedFixture, fixtureBatch, fixtureShocks, DEMO_IDS, FIXTURE_TIME } from './fixtures';
 import { exportState, restoreState, sanitizeFixtureState } from './backup';
-import { BinanceCredentials, DummyCredentials } from './credentials';
+import { DummyCredentials } from './credentials';
 import { SpotOfflineReader, spotRisk, spotShock, SpotError } from './spot';
 import { spotFixtureTransport, type SpotScenario } from './spot-fixture';
 import { PublicMarketReader, PublicMarketError, publicMarketRisk } from './public-market';
+import { SpotBridge } from './spot-bridge';
 import './style.css';
 
 export function SpotHoldingsTable({state,report,publicQuotes=false}:{state:PortfolioState;report:ReturnType<typeof spotRisk>;publicQuotes?:boolean}) {
@@ -18,46 +19,6 @@ export function SpotHoldingsTable({state,report,publicQuotes=false}:{state:Portf
       return <tr key={positionKey(s.accountId,p.asset)}><td>{s.dataMode} / Binance / Spot / {p.asset.code} / {p.asset.type}</td><td>{p.quantity}</td><td>{p.price?`${p.price.value} / ${p.price.asOf} / ${p.price.source}`:'缺价格'}</td><td>{value??'不可用'}</td><td>{weight===undefined?'不可用':`${nonnegative(weight).mul(100).toFixed(2)}%`}</td><td>{p.asset.code==='USDT'?'同币种 0%':'回落 20%'} / {loss}</td><td>{s.collectionStartedAt} 至 {s.collectionEndedAt} / {eligible?'当前可估值':'缺估值或历史失效'}</td></tr>;
     }))}
   </tbody></table>;
-}
-
-function BinanceCredentialPanel({credentials}:{credentials:BinanceCredentials}) {
-  const apiKey=useRef<HTMLInputElement>(null), secret=useRef<HTMLInputElement>(null);
-  const [saved,setSaved]=useState<boolean|null>(null), [busy,setBusy]=useState(false), [message,setMessage]=useState('正在检查本机凭据状态。');
-  useEffect(()=>{let active=true;credentials.isSaved().then(value=>{if(active)setSaved(value);}).catch(()=>{if(active)setMessage('无法确认本机凭据状态；请保持断开。');});return()=>{active=false;};},[credentials]);
-  const save=async()=>{
-    const key=apiKey.current?.value??'', value=secret.current?.value??'';
-    setBusy(true);
-    try {
-      await credentials.save(key,value);
-      if(apiKey.current)apiKey.current.value='';
-      if(secret.current)secret.current.value='';
-      setSaved(true);setMessage('凭据已通过 Wealthfolio secrets 保存。尚未发送认证请求。');
-    } catch(e) {setMessage(e instanceof Error?e.message:'凭据保存失败；连接已断开。');}
-    finally {if(apiKey.current)apiKey.current.value='';if(secret.current)secret.current.value='';setBusy(false);}
-  };
-  const remove=async()=>{
-    setBusy(true);
-    try {
-      await credentials.disconnectAndDelete();
-      if(apiKey.current)apiKey.current.value='';
-      if(secret.current)secret.current.value='';
-      setSaved(false);setMessage('本机 secrets 凭据已删除；这不会撤销 Binance 端的 API Key。');
-    } catch(e) {setMessage(e instanceof Error?e.message:'删除未确认完成；连接保持断开。');}
-    finally {setBusy(false);}
-  };
-  return <section className="credential-panel">
-    <h2>本机 Binance Spot 凭据</h2>
-    <p>请在 Binance 端只启用 Spot 只读权限，关闭交易和提现。凭据只通过 Wealthfolio 官方 secrets 保存；插件不写普通 storage 或模拟备份。当前仅完成本地保存；真实余额请求已硬阻断。</p>
-    <label>API Key<input ref={apiKey} type="password" autoComplete="off" spellCheck={false} /></label>
-    <label>Secret<input ref={secret} type="password" autoComplete="off" spellCheck={false} /></label>
-    <div className="actions">
-      <button disabled={busy} onClick={save}>安全保存凭据</button>
-      <button disabled={busy} onClick={remove}>断开并清理本机凭据</button>
-      <button disabled title="Wealthfolio 3.9.1 的失败日志可能包含签名 URL">读取 Spot 余额（安全检查未通过）</button>
-    </div>
-    <p role="status">{saved===true?'本机已保存凭据。':saved===false?'本机没有已保存凭据。':'本机凭据状态未知。'} {message}</p>
-    <p>删除本机凭据不会撤销 Binance 端的 API Key；需要撤销时请在 Binance API 管理页面操作。</p>
-  </section>;
 }
 
 function SpotPanel({reader,scenario}:{reader:SpotOfflineReader;scenario:{current:SpotScenario}}) {
@@ -108,11 +69,28 @@ function PublicMarketPanel({reader}:{reader:PublicMarketReader}) {
   </section>;
 }
 
+function BridgePanel({quotes}:{quotes:PublicMarketReader}) {
+  const bridge=useMemo(()=>new SpotBridge(),[]),input=useRef<HTMLTextAreaElement>(null);
+  const [now,setNow]=useState(Date.now),[message,setMessage]=useState('尚无余额快照；凭据只在独立本地读取器输入，插件不接收Key或Secret。'),[busy,setBusy]=useState(false);
+  useEffect(()=>{const t=setInterval(()=>setNow(Date.now()),10_000);return()=>clearInterval(t);},[]);
+  const {state,report}=bridge.valued(quotes.getState(),now),mode=Object.values(state.snapshots)[0]?.dataMode;
+  const amount=(v:string|null)=>v===null?'不可用':`${v} USDT`;
+  return <section><h2>本地读取器余额 · 独立 Spot</h2>
+    <p>来源：{mode==='external'?'真实账户快照（用户本机导入）':mode==='fixture'?'辅助程序虚构验收数据':'未覆盖'}。本区不与任何旧模拟账户合计，不写主程序或备份。只支持一个来源账户；关闭页面清空会话。余额60秒、价格120秒有效；无自动余额同步。</p>
+    <p>先在本地读取器生成快照，复制不含凭据的JSON到此处。读取失败也应导入失败快照；禁止粘贴API Key、Secret或完整认证响应。普通快照格式不是来源真实性的加密证明，请只导入自己刚生成的内容。</p>
+    <label>本地余额快照<textarea ref={input} autoComplete="off" spellCheck={false}/></label>
+    <button onClick={()=>{try{bridge.import(input.current?.value??'',Date.now());setMessage('快照已处理；请核对来源、数量、UID与时间。');}catch{setMessage('导入失败；历史数量保留，当前不可用。');}finally{if(input.current)input.current.value='';setNow(Date.now());}}}>导入本地余额快照</button>
+    <button disabled={busy} onClick={async()=>{setBusy(true);try{await quotes.refresh();setMessage('真实公开报价已更新；余额数量仍来自本机导入，未发送认证请求。');}catch{setMessage('公开行情失败；保留数量及缺估值提示。');}finally{setNow(Date.now());setBusy(false);}}}>更新公开报价并估值</button>
+    <p role="status">{message}</p><p>当前可估值部分：{amount(report.coveredSubtotal)}；完整Spot估值：{amount(report.total)}；情景损失：{amount(report.stressLoss)}；覆盖 {report.coverage}；缺估值 {report.unpricedPositionCount} 条。</p>
+    <p>来源账户UID：{state.accounts[0]?.sourceAccountId??'未覆盖'}；余额采集时间：{report.lastKnownSnapshotTimes.join('、')||'无'}；历史可估值部分：{amount(report.lastKnownSubtotal)}（不是当前资产）。</p>
+    <SpotHoldingsTable state={state} report={report}/><ul>{report.issues.map((v,i)=><li key={i}>{v}</li>)}</ul>
+  </section>;
+}
+
 function RiskPage({ ctx, initial }: { ctx: AddonContext; initial: PortfolioState }) {
   const [state,setState] = useState(initial), [busy,setBusy] = useState(false), [message,setMessage] = useState('固定模拟基线；没有主程序读写权限');
   const [backup,setBackup] = useState('');
   const credentials=useMemo(()=>new DummyCredentials(ctx.api.secrets),[ctx]);
-  const binanceCredentials=useMemo(()=>new BinanceCredentials(ctx.api.secrets),[ctx]);
   const spotScenario=useRef<SpotScenario>('normal');
   const spotReader=useMemo(()=>new SpotOfflineReader(credentials,spotFixtureTransport(()=>spotScenario.current)),[credentials]);
   const publicReader=useMemo(()=>new PublicMarketReader({request:request=>ctx.api.network.request(request)}),[ctx]);
@@ -130,10 +108,10 @@ function RiskPage({ ctx, initial }: { ctx: AddonContext; initial: PortfolioState
   };
   return <main>
     <h1>币安风险插件 · 最小验证</h1>
-    <p className="notice">全部持仓数量均为模拟。旧离线报价时间：{FIXTURE_TIME}。Binance Stocks 未支持。请在独立测试资料库使用。</p>
-    <p>v0.1.6 公开行情：仅指定主机的公开请求；真实认证请求阻断，无主程序资产读写权限。样例不代表实时余额。</p>
+    <p className="notice">各区域来源独立：本地读取器快照与旧模拟数据不合计。旧离线报价时间：{FIXTURE_TIME}。Binance Stocks 未支持。请在独立测试资料库使用。</p>
+    <p>v0.1.8 本地只读快照交接；插件真实认证请求阻断，无主程序资产读写权限。真实凭据仅在独立本地读取器输入。</p>
+    <BridgePanel quotes={publicReader}/>
     <PublicMarketPanel reader={publicReader}/>
-    <BinanceCredentialPanel credentials={binanceCredentials}/>
     <SpotPanel reader={spotReader} scenario={spotScenario}/>
     <h2>历史模拟基准（独立保存，不与 Spot 链路相加）</h2>
     <div className="actions">

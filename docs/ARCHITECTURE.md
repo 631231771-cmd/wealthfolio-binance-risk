@@ -86,3 +86,13 @@ src/public-market.ts 独立接收SDK network.request能力，不接收ctx/secret
 `BinanceCredentials` 只使用独立的 `risk-binance-spot-*` secrets 键；界面只显示是否已保存，输入框为密码型非受控字段，保存后立即清空。它不写普通 storage 或模拟导出。
 
 `buildOfflineReadRequest` 只构造 Spot `GET /api/v3/account`，测试使用虚构凭据与工厂 mock。实际认证入口没有 network 参数并保持硬阻断。`mergePublicSpotPrices` 只从成功且未过期的 v0.1.6 公开行情提取价格，保留 external 余额数量，删除旧价；USDT 按 USDT 计价单位处理，缺行情资产保留未定价。
+
+## v0.1.8 用户批准的本地只读交接
+
+native/SpotReader.cs是独立Windows进程，只有WinForms、DPAPI及.NET HTTP。凭据在CurrentUser加密文件中候选核验后原子替换；不读取Wealthfolio的secrets，不监听端口。默认fixture模式不发认证；显式--allow-live及界面确认只供用户下一轮授权后使用，固定HTTPS api.binance.com GET time/account，预期UID与响应核对。宿主日志漏洞未修复，本方案让宿主完全不接触认证请求。
+
+用户主动复制余额白名单JSON→spot-bridge.ts验证格式/UID/mode/起止/60秒TTL→单一账户替换快照→public-market.ts共用赋价（不复制模拟数量）→原通用风险函数→独立页面。fixture和external不混合；其他UID拒绝；未知、缺价、过期和失败语义保持。非法导入会将旧快照标记失效；辅助程序失败状态必须手动交接，否则插件只能等旧快照TTL到期。状态仅页面内存，没有宿主写入或真实备份。
+
+插件撤下v0.1.7真实凭据输入，保留旧secrets代码/虚构测试回归；权限不扩展，公开行情仍官方代理。UI每10秒重算，不发后台余额请求；只限五个已审核市场，其他资产缺价。JSON的来源标记不是加密身份认证，余额剪贴板仍是资产隐私；Windows同用户恶意进程、调试与OS追踪不在DPAPI/应用固定错误码的保护承诺内。内置AI/DeepSeek配置未变，不以“仅内存”宣称所有AI隐私隔离已经通过。
+
+native/SpotReader.SelfTest.cs只在显式自检时启动临时loopback假服务器，凭据固定虚构、输出fixture，不是产品服务或宿主网络绕过。Windows Actions执行96项插件测试和原生自检，产物全部留在artifacts。运行界面不会开放自定义URL、header、脚本或交易接口。

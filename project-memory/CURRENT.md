@@ -1,29 +1,24 @@
 # 当前状态
-日期：2026-10-15；唯一项目根目录 F:\Code\风控。开发候选 v0.1.7 基于 v0.1.6 提交 e7fcadc；分支 feature/spot-readonly-offline。已授权提交/推送该私有开发分支，但环境将当前 .git 设为只读，git add 无法创建 index.lock；GitHub 写入工具又要求本环境不可用的审批。本轮改动尚未提交或推送，文件仍在本地工作区。
 
-## 本轮进展
-- 增加本机 Binance Spot API Key/Secret 界面与独立 secrets 键；输入保存后清空，只显示已保存/未保存/未知状态。没有写普通存储或模拟备份。
-- 仅保留离线构造的 Spot GET /api/v3/account；真实认证发送入口和界面按钮均硬阻断。网络主机仍只有 v0.1.6 的公开行情主机。
-- 增加新鲜公开 USDT 报价应用到 external Spot 数量的计算入口；不混入模拟数量，未知/缺价资产保留为未定价。
-- 已复核 Wealthfolio v3.9.1 签名 URL 错误日志风险，证据与修复条件见 docs/SECURITY.md。宿主未修复前不做真实认证请求。
-- 本轮自动验证：typecheck、90 项测试、build、独立 smoke 通过；npm run verify 在 package 阶段受本机 PowerShell ExecutionPolicy 阻断，未绕过。未完成真实桌面 UI 验收；没有使用真实凭据或发送真实请求。
-
+2026-10-15。唯一根目录F:\Code\风控，分支feature/spot-readonly-offline；已推送基线a60a032/v0.1.7，CI38692606816成功。本轮v0.1.8工作区新增本地读取器及快照交接，用户已明确批准这条路线；本轮已授权正常提交推送，界面验收未完成；实际提交/CI以Git和本地收据为准，main不变。
 
 ## 已完成且验证
-- 公开行情已实现且真实联网：官方network.request，仅data-api.binance.vision、GET time/exchangeInfo/ticker/price。BTC/ETH/BNB/SOL/DOGE的明确USDT市场与报价成功；无API Key、Secret、auth、签名、账户请求或后台采集。
-- 页面明确“真实市场报价 + 模拟持仓”，数量固定且只在内存；行情来源external、数量fixture，不写主程序/旧备份、不与旧样例相加，不假定USDT=USD。ticker展示采集时间，不是成交时间。
-- 本机完整verify：85项、0失败，类型/构建/ZIP/静态入口通过；原30000 USD/5500、24000 USDT/4000、37100 USDT/6620不回归。无新增依赖。GitHub Actions结果独立记录，不能用本机通过替代。
-- 官方Windows3.9.1、WRISK Windows验收独立资料库：用户亲自批准安装及唯一主机；真实报价、重启、重复刷新、近时官网价格对照、模拟断网显示、恢复、120秒自然过期、结束断开通过。旧主程序仍30000 USD，旧插件基准30000/5500保留。
-- 2026-10-15T05:07:07.272Z：公开价格计算模拟估值50717.38 USDT、情景损失9343.476；独立算术一致。0.636秒后网页BTC差+0.01、ETH差+0.35 USDT，非同一时刻。完整证据见VALIDATION最新节。
-- 包artifacts/wealthfolio-binance-risk-0.1.6.zip，SHA256 d0b55e00e2731a0e52daed6f2b4480f15de12b5c6bae374f315a9ddda0e6ba9b；旧包保留。构建收据的桌面待办是构建时状态，实机结果见验证记录。
 
-## 限制与待验证
-- 仅公开行情可用，持仓全部模拟。真实认证入口仍硬阻断；没有真实密钥输入，没有真实账户连接。本轮未调用Astra，未修改其他资料库、DeepSeek或AI设置。
-- 宿主按HTTPS及精确批准主机限制，不按GET/三个路径/默认端口限制；更窄范围由插件固定构造。源码/请求契约核对通过，未做未授权主机负向探测或TLS抓包。
-- 模拟断网按钮只是状态注入；OS实际断网、原生HTTP429/418/503与原生超时未复现，对应mock通过。SDK不支持取消：超时后等底层结束才可重试，断开拒绝迟到结果。没有修改系统网络。
-- 真实接入仍须解除签名URL宿主日志风险，核实AI逐资料库禁用与工具空白名单、凭据生命周期及只读权限、真实身份/余额/报价对账与备份。现有官方插件层未找到可靠受支持的签名错误脱敏路径，不能以公开行情成功当作已解决。
-- Funding原始四字段不相加，跨钱包快照不保证完整合计；Stocks unsupported。v0.1.4自身桌面未复验；v0.1.5已通过。v0.1.6未重复假凭据替换/删除与桌面备份等历史项。
-- 结束时公开会话已断开，离线会话未采集；假凭据仍由用户此前流程保留，本轮未读取/更改/删除。
+- 官方3.9.1与3.10.0均仍有原reqwest错误→invoke日志链路风险，且拒绝localhost/loopback/私网。本机宿主已为3.10.0，本轮未升级/降级；不能记成3.9.1实机通过。
+- v0.1.7用户安装到独立WRISK测试资料库，虚构凭据保存、真实关窗重启读回、替换及用户删除全部通过，删除结果为空；原30000/5500保持。没有真实密钥或认证请求，未改DeepSeek/其他资料库配置。
+- v0.1.8独立Windows读取器：WinForms/DPAPI/HttpClient，固定Spot GET time/account，无监听服务/第三方依赖。默认虚构模式；只有显式--allow-live及界面确认才可真实请求，当前未启动真实模式。预期UID核对、密文候选核验后原子替换、取消/超时/限流、固定错误码，无原始URL/header/body/异常日志。
+- 插件撤下真实凭据输入，独立spot-bridge严格白名单导入；来源/UID/采集时间/状态保留，fixture和external不混合、重复替换不累加；复用五个公开USDT市场报价。真实余额不写宿主/备份，不与旧模拟数量合计；缺价/过期/失败不当0。
+- 本机完整verify通过96项TS测试、类型、构建、ZIP、smoke和原生自检；原生增加body停滞故障发现取消信号不足，已改为总时限主动关闭流并重跑通过。当前原生自检13项，覆盖DPAPI独立进程生命周期、真实loopback HTTP假签名/失败/中断/body超时/限流及日志保护，输出JSON实际进入插件解析计算。没有访问Binance私人主机。
+- ZIP artifacts/wealthfolio-binance-risk-0.1.8.zip，SHA256 bbb760f1fd8d8b3ce486195eef0ac81317ed6c10549b8543e6ed773e53565f66。
+- 读取器 artifacts/spot-reader/WealthfolioSpotReader.exe，FileVersion0.1.8.0，SHA256 71f83501613e8e6e6390ea3ff89cf3fb2ebf8b0a95a52ecf640dc76b34f72395；说明和自检结果同目录。产物不入Git。
+
+## 尚未完成与限制
+
+- v0.1.8官方桌面安装及辅助程序GUI假凭据/手动快照导入，等待用户批准后执行；不把HTTP自检或编译当成界面通过。
+- 手动读取失败必须交接failed快照或空导入，未交接时插件最多等余额60秒TTL才失效；不是自动同步。数量保留、报价120秒TTL，NOPAIR等缺价，USDT不默认USD。
+- DPAPI不防同用户恶意进程/管理员/调试；凭据短暂在辅助程序内存。JSON/剪贴板有资产隐私，mode不是来源加密证明，不能上传。真实数据只在插件会话内存，不能因此宣称内置AI隔离已完整验证。
+- 宿主签名日志漏洞未修复，插件认证仍硬阻断。原生TLS证书故障、真实Binance Key只读/IP权限、余额与UID对账、AI隔离与真实备份未验证。Funding/Stocks不支持；未调用Astra、未修改宿主或旧WorldState。
 
 ## 下一步唯一优先任务
-恢复当前仓库 .git 写权限后，将本轮已审阅改动提交并推送 feature/spot-readonly-offline；随后用虚构凭据完成 Wealthfolio Windows 实机保存/重启读回/删除验收，并等待官方宿主修复及核验签名 URL 错误日志。上述安全条件通过后，再由用户单独授权真实 Spot 只读请求。认证发送继续硬阻断。
+
+完成用户批准后的v0.1.8虚构Windows界面交接与Git/CI交付，然后立即停止，等待用户确认首次独立小额测试账户真实只读请求。当前不启动真实模式，不索取真实Key。

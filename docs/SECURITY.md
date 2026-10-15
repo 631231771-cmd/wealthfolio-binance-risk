@@ -65,3 +65,19 @@ v0.1.4 增量：Spot 仅固定假凭据与模拟传输，不增加权限，真�
 当前插件因此保留无 transport 参数的 `requestAuthenticated()` 硬阻断。修复条件：官方宿主在发送和读取响应分块的错误路径移除 URL 后再返回/记录错误，并在对应 Windows 版本核验真实日志不含 `signature=`；之后仍需用户单独授权真实认证请求。此轮没有修改 Wealthfolio 主程序，也没有发送真实认证请求。
 
 源码：[`core.ts`](https://github.com/wealthfolio/wealthfolio/blob/v3.9.1/apps/frontend/src/adapters/tauri/core.ts)、[`addon-network.ts`](https://github.com/wealthfolio/wealthfolio/blob/v3.9.1/apps/frontend/src/adapters/shared/addon-network.ts)、[`network.rs`](https://github.com/wealthfolio/wealthfolio/blob/v3.9.1/crates/core/src/addons/network.rs)、[`service.rs`](https://github.com/wealthfolio/wealthfolio/blob/v3.9.1/crates/core/src/addons/service.rs)、[reqwest 0.12.28 Error](https://github.com/seanmonstar/reqwest/blob/v0.12.28/src/error.rs)。
+
+## 2026-10-15 实机版本变化及本地适配器限制
+
+本机E:\Wealthfolio\Wealthfolio.exe的ProductVersion/FileVersion均已为3.10.0；本轮未执行升级或降级。补查官方v3.10.0的network.rs第103/121行仍使用原始e.to_string()，tauri/core.ts第50行仍记录原始invoke错误，签名日志阻塞未消失。3.9.1与3.10.0都拒绝localhost/loopback/私网解析，不能把本地HTTP代理列入白名单后直接使用，也不能绕过官方代理。
+
+因此，安全本地适配器需要用户决定交接方式：推荐无监听端口的独立本地读取器，通过用户主动导入白名单余额快照交给插件，凭据不进入宿主；代价是手动步骤与余额资料在文件/剪贴板上的本机隐私风险。详见SPOT-CONNECTION-DECISION.md，当前待批准，尚未实现或发送真实请求。不能把本地适配器存在当作已解决安全问题，须再验收安全存储与原生错误/日志链路。
+
+## v0.1.8 本地只读读取器路线（用户已批准）
+
+2026-10-15用户明确接受“独立本地辅助程序＋手动快照交接”。不修改宿主，也不尝试通过localhost、fetch或网络隧道接进沙箱。native/SpotReader.cs固定使用原生HttpClient GET api.binance.com的time/account；宿主只收到白名单余额JSON，不收到Key、Secret、签名或认证URL。默认fixture不发认证；真实模式还需显式启动参数、界面确认及用户下一轮批准。
+
+凭据使用Windows CurrentUser DPAPI、候选核验、同卷原子替换；fixture/live目录隔离，未明文保存或放入命令行。插件撤下真实凭据输入，旧SDK凭据管理仅留回归；本轮v0.1.7虚构值已由用户删除，界面确认本机不存在且原删除方法内读回null。DPAPI不防同用户恶意进程、管理员、调试器；字符串会短暂留在本进程内存，OS追踪/转储不属于应用日志保护承诺。
+
+原生自检实际经过loopback HTTP假签名/header检查、原生连接中断、响应body停滞、HTTP错误和限流。错误body和注入异常包含固定假Key/Secret/完整签名URL，但程序对外仅返回批准错误码，不传原异常或cause；没有关闭宿主日志。测试发现.NET Framework流读取仅传CancellationToken不足以取消停滞，已增加到期Dispose响应流，原生停滞测试确认取消生效。原生TLS证书握手故障和真实Binance请求没有实测；不将应用错误码测试说成宿主漏洞修复或所有OS日志均安全。
+
+手动交接失去自动同步：必须导入失败快照或空导入使当前失效，否则旧余额最多到60秒TTL才知道过期。JSON虽无凭据仍是财务隐私，不能上传云端/聊天；只接收自己刚生成的内容，格式mode不提供加密真实性证明。内置AI/DeepSeek未修改，首次真实操作仍需核实独立资料库的AI隔离与只读Key/IP/UID，并单独确认首次请求。其他钱包/交易/提现/划转没有新增路径。

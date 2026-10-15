@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {SpotBridge} from '../src/spot-bridge.ts';
+const text=readFileSync(new URL('../artifacts/spot-reader/spot-reader-fixture.json',import.meta.url),'utf8');
+const dto=JSON.parse(text),now=Date.parse(dto.endedAt),bridge=new SpotBridge();
+bridge.import(text,now);
+const v=bridge.valued({schemaVersion:1,accounts:[],snapshots:{},statuses:{}},now);
+assert.equal(v.report.coveredSubtotal,'15.00000000');assert.equal(v.report.unpricedPositionCount,3);
+assert.equal(Object.values(v.state.snapshots)[0].dataMode,'fixture');assert.equal(v.report.coverage,'partial');
+assert.ok(!/signature|WRISK_FAKE|secret|apiKey/.test(text));
+console.log('原生进程HTTP自检生成快照 → 插件解析与估值通过；数量为fixture，不是真实Binance连接。');

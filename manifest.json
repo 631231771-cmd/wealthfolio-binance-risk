@@ -1,7 +1,7 @@
 {
   "id": "wealthfolio-binance-risk",
   "name": "币安风险 · 模拟验证",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "真实公开行情与模拟持仓估值；私人认证保持阻断，无主程序资产权限。",
   "author": "个人项目",
   "main": "dist/addon.js",

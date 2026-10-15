@@ -6,7 +6,9 @@
 
 ## 当前状态
 
-**开发分支基于 v0.1.6。** 本轮加入本机 Binance Spot API Key/Secret 输入和 Wealthfolio 官方 secrets 保存；凭据仅在界面显示保存状态，真实认证请求继续硬阻断。阻断原因是 Wealthfolio v3.9.1 的网络错误日志可能包含签名 URL；插件未扩展网络主机/路径，也未修改主程序。已有公开行情仍是实时报价加固定模拟持仓，尚未连接真实余额。
+**v0.1.8：本地只读读取器＋手动余额快照交接。** 用户已批准此路线，插件不再接收真实密钥；独立Windows读取器用DPAPI保管凭据，只实现Spot GET time/account。默认启动为虚构验收模式，真实模式必须另行授权。插件独立导入白名单快照，保留数量/来源/UID/时间与缺价/过期提示，再使用已有公开报价估值；不与旧模拟账户合计、不写宿主或备份。本轮尚未连接真实Binance账户，实际测试结果见VALIDATION。
+
+本机宿主已为3.10.0，3.9.1/3.10.0均存在签名URL宿主日志风险并拒绝localhost；本方案不让认证经过宿主，也没有本地监听服务。取舍是余额必须由用户主动交接，读取失败也需导入失败快照，否则旧余额最多到60秒TTL才失效。凭据仅在辅助程序密码框输入，余额JSON仍需按财务隐私保护。完整操作、真实模式前置条件和安全边界见 [本地读取器说明](native/README.md)。v0.1.7官方secrets虚构值生命周期已在本机3.10.0验收；新版撤下其真实凭据输入框，旧代码仅保留离线回归。
 
 点击「刷新真实公开行情」读取五个USDT交易对，以 BTC0.4、ETH2、BNB10、SOL20、DOGE1000、USDT4000 固定模拟数量计算估值；金额随行情变化，不是真实资产或账户余额。独立内存模块不与离线样例相加，不写主程序、普通存储或模拟备份。展示采集时间，ticker没有成交时间；报价120秒失效，每10秒刷新显示，无自动采集。失败/断开时当前不可用，旧报价仅历史参考；429/418冷却，无自动重试。模拟断网按钮只注入失败状态，不改变系统网络。实机/自动化结果以VALIDATION最新节为准。
 
@@ -35,7 +37,7 @@
 
 ## 给用户的安装与验收
 
-当前包位于 `artifacts/wealthfolio-binance-risk-0.1.6.zip`，旧包原样保留。新增网络request权限且只声明data-api.binance.vision，用户须亲自批准该主机；不能批准通配主机或api.binance.com。各版本实际桌面结果见VALIDATION。
+当前插件包位于 `artifacts/wealthfolio-binance-risk-0.1.8.zip`，辅助程序位于 `artifacts/spot-reader/WealthfolioSpotReader.exe`，旧包原样保留。插件权限未扩展，主机仍只有data-api.binance.vision；不能批准api.binance.com或localhost。辅助程序独立使用固定只读请求，默认不联网。各版本实际桌面结果见VALIDATION。
 
 安装官方 [v3.9.1 Windows x64 发行版](https://github.com/wealthfolio/wealthfolio/releases/tag/v3.9.1)，使用独立测试资料库，在插件管理页选择从本地 ZIP 安装并审核权限。逐步操作见 [Windows 验收](docs/WINDOWS-ACCEPTANCE.md)。
 

@@ -1,0 +1,13 @@
+import { mkdirSync,readFileSync,copyFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { join,resolve } from 'node:path';
+const root=resolve(import.meta.dirname,'..'),out=join(root,'artifacts','spot-reader');
+mkdirSync(out,{recursive:true});
+copyFileSync(join(root,'native','README.md'),join(out,'README.md'));
+const compiler=join(process.env.WINDIR??'C:\\Windows','Microsoft.NET','Framework64','v4.0.30319','csc.exe');
+const exe=join(out,'WealthfolioSpotReader.exe');
+execFileSync(compiler,['/nologo','/target:winexe','/optimize+','/out:'+exe,'/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/r:System.Security.dll','/r:System.Net.Http.dll',join(root,'native','SpotReader.cs'),join(root,'native','SpotReader.SelfTest.cs')],{stdio:'inherit'});
+execFileSync(exe,['--self-test',join(out,'SELF-TEST.json')],{stdio:'inherit'});
+const result=JSON.parse(readFileSync(join(out,'SELF-TEST.json'),'utf8'));
+if(!result.success)throw new Error('本地读取器自检失败');
+console.log('Windows本地读取器：'+result.passed.join('；'));
