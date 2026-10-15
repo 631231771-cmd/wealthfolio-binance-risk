@@ -390,3 +390,12 @@ main/v0.1.3 保存基线提交 91f3432；本轮 feature/spot-readonly-offline �
 - 新包artifacts/wealthfolio-binance-risk-0.1.10.zip SHA256 b4a683f85ea730edd3ee90faa18f97a308869256a2ef674f1fa6d6b4d3ddbf08，manifest/package/锁文件版本一致，依赖/权限/主机不增加。旧ZIP与备用EXE未覆盖。
 - 用户本人批准后，实际Windows/宿主3.10.0、WRISK Windows验收20261013：插件管理器显示v0.1.10，启用且页面打开成功。看到未连接/等待本人确认查询、指标不可用、刷新禁用，连接设置可展开；输入框空白且四项确认未勾选。助手未输入、保存/替换/删除凭据、点击查询或开启自动刷新。页面仅查活动标记，不读Key/Secret槽（调用边界由新增替身测试验证，未拦截真实secrets）。
 - 修复9f13ec6已普通推送开发分支，GitHub Actions 38732774297完整通过；main不变。仅补安装记录不重建已安装ZIP。真实认证、权限、UID、数量和自动刷新仍未验证；当前停在等待本人查询。宿主签名URL日志风险仍存在，不把新增安全诊断说成宿主漏洞修复。
+
+## v0.1.11首次查询显示与本人IP策略决定（2026-10-15）
+
+- 起点e4e40b4、工作区干净。本人回报旧版权限阶段HTTP400/-2008，随后回报READ_ONLY_REJECTED/ipRestrict=false；只保存安全码，不获取完整响应、密钥、UID或持仓。后者说明旧插件在IP条件处拦截，不证明余额或账户身份已经验证。
+- 独立离线复现：authorize后、任何network/secrets调用前，connected=true但success=false/快照0/密码框0。新测试先失败，修正为按success隐藏后密码框2/首次查询按钮仍在，网络及secrets读取均为0。保留成功后隐藏；未因排错修改真实凭据。该替身/静态证据不能冒充真实首次查询GUI回归。
+- -2008不再归invalid，改为固定认证错误和“连接资料未通过验证”说明。依据[CCXT币安源代码](https://github.com/ccxt/ccxt/blob/master/ts/src/binance.ts)的AuthenticationError映射，注释undocumented；当前币安官方Spot/Wallet表未列出，不能由此断言Key已失效或断言本机仍存假值。没有复制上游代码。
+- 用户明确选择独立小额账户纯只读、不强制IP白名单，并接受连接资料泄露后资产信息可能被读取的风险。只移除ipRestrict===true条件，保留字段必须boolean、enableReading=true、九项危险权限明确false及未知true拒绝。四项本人确认保留且权限说明同步，主机/请求/签名/估值/账本与模拟隔离均不变。
+- **完整npm run verify实际通过122/122项TS、类型、build/package/smoke/receipt、13项既有原生自检和交接。** 新测无IP可读、IP字段缺失/非布尔/读取关闭/额外权限仍拒绝；旧风险基准不回归。未发真实认证，不使用私人凭据。
+- 0.1.11 ZIP SHA256 d00a3bd1e817b6502986cf225122569f8ff4b9efed4041a853dc7ddaf02f80f3，manifest/package/锁文件版本一致，依赖/权限/主机不增加。用户本人已批准安装，实际宿主3.10.0、WRISK测试资料库管理器显示0.1.11，页面打开成功，空持仓/自动关闭/NOT_CONNECTED和等待本人查询已看到；进一步滚动时检测本人输入，立即停止观察，不再捕获当前窗口。没有代点查询/确认、读取密钥或改AI配置。新说明和进行中保留DOM行为仅自动化验证；真实余额仍待本人回报，不能由本次静态/安装通过推断成功。

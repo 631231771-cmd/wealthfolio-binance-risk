@@ -23,7 +23,7 @@ async function harness(timeout=100){
   if(mode==='limit'&&u.hostname==='api.binance.com')return {status:429,headers:{'Retry-After':'3600'},body:'<html>WAF</html>'};
   let body:unknown;
   if(u.pathname.endsWith('/time'))body={serverTime:now};
-  else if(u.pathname.endsWith('/apiRestrictions'))body=mode==='trade'?{...permissions,enableSpotAndMarginTrading:true}:permissions;
+  else if(u.pathname.endsWith('/apiRestrictions'))body=mode==='trade'?{...permissions,enableSpotAndMarginTrading:true}:mode==='no-ip'?{...permissions,ipRestrict:false}:permissions;
   else if(u.pathname.endsWith('/account'))body={uid:mode==='uid'?2:1,accountType:'SPOT',balances:mode==='zero'?[]:mode==='missing'?null:[{asset:'BTC',free:'0.001',locked:'0'},{asset:'USDT',free:'12',locked:'3'},{asset:'NOPAIR',free:'2',locked:'0'}]};
   else if(u.pathname.endsWith('/exchangeInfo'))body={symbols:[{symbol:'BTCUSDT',baseAsset:'BTC',quoteAsset:'USDT',status:'TRADING',isSpotTradingAllowed:true}]};
   else body=[{symbol:'BTCUSDT',price:'50000'}];
@@ -35,7 +35,7 @@ async function harness(timeout=100){
 }
 
 test('HTTP400先解析数字业务码，诊断不含msg、URL或认证信息',async()=>{
- for(const [exchangeCode,code] of [[-1022,'SPOT_SIGNATURE'],[-1021,'SPOT_CLOCK'],[-2015,'SPOT_AUTH'],[-9999,'SPOT_INVALID']] as const){
+ for(const [exchangeCode,code] of [[-1022,'SPOT_SIGNATURE'],[-1021,'SPOT_CLOCK'],[-2008,'SPOT_AUTH'],[-2015,'SPOT_AUTH'],[-9999,'SPOT_INVALID']] as const){
   const h=await harness();h.reader.authorize('1',ack);
   h.setResponse({status:400,headers:{},body:JSON.stringify({code:exchangeCode,msg:'TEST_SECRET_NOT_REAL https://bad/?signature=RAW'})});
   await h.reader.sync();const d=h.reader.getDiagnostic();
@@ -48,8 +48,8 @@ test('修正普通认证失败后重新确认可重试，不继承旧10分钟退
  h.reader.disconnect();await h.credentials.save('TEST_KEY_NOT_REAL','TEST_SECRET_NOT_REAL');h.reader.authorize('1',ack);h.setResponse(undefined);
  await h.reader.sync();assert.equal(h.reader.getStatus().success,true);assert.equal(h.reader.valued().report.coveredSubtotal,'65.00000000');
 });
-test('只读拒绝明确区分缺字段、读取关闭、IP关闭和额外权限',()=>{
- for(const [value,code] of [[{...permissions,enableReading:false},'READING_DISABLED'],[{...permissions,ipRestrict:false},'IP_ALLOWLIST_DISABLED'],[{...permissions,enableWithdrawals:true},'EXTRA_PERMISSION'],[{...permissions,enableWithdrawals:undefined},'PERMISSION_FIELDS_INCOMPLETE']] as const){
+test('只读拒绝明确区分缺字段、读取关闭和额外权限，IP布尔字段仍必须完整',()=>{
+ for(const [value,code] of [[{...permissions,enableReading:false},'READING_DISABLED'],[{...permissions,ipRestrict:undefined},'PERMISSION_FIELDS_INCOMPLETE'],[{...permissions,enableWithdrawals:true},'EXTRA_PERMISSION'],[{...permissions,enableWithdrawals:undefined},'PERMISSION_FIELDS_INCOMPLETE']] as const){
   assert.throws(()=>assertReadOnly(value),(e:any)=>e.code===code);
  }
 });
@@ -90,7 +90,7 @@ test('错误响应受字符/UTF8大小限制，非JSON保留HTTP分类且不猜�
  for(const c of cases){const h=await harness();h.reader.authorize('1',ack);h.setResponse({status:c.status,headers:{},body:c.body});await h.reader.sync();const d=h.reader.getDiagnostic();assert.equal(d.code,c.expected);assert.equal(d.httpStatus,c.status);assert.equal(d.exchangeCode,undefined);assert.ok(JSON.stringify(d).length<250);}
 });
 test('权限诊断只含必要已知字段，不回传未知权限名和完整响应',async()=>{
- for(const [body,reason,field] of [[{...permissions,enableReading:false},'READING_DISABLED','enableReading'],[{...permissions,ipRestrict:false},'IP_ALLOWLIST_DISABLED','ipRestrict'],[{...permissions,enableWithdrawals:true},'EXTRA_PERMISSION','enableWithdrawals'],[{...permissions,enableWithdrawals:'false'},'PERMISSION_FIELDS_INCOMPLETE','enableWithdrawals'],[{...permissions,'TEST_SECRET_NOT_REAL signature=RAW':true},'EXTRA_PERMISSION',undefined]] as const){
+ for(const [body,reason,field] of [[{...permissions,enableReading:false},'READING_DISABLED','enableReading'],[{...permissions,ipRestrict:undefined},'PERMISSION_FIELDS_INCOMPLETE','ipRestrict'],[{...permissions,enableWithdrawals:true},'EXTRA_PERMISSION','enableWithdrawals'],[{...permissions,enableWithdrawals:'false'},'PERMISSION_FIELDS_INCOMPLETE','enableWithdrawals'],[{...permissions,'TEST_SECRET_NOT_REAL signature=RAW':true},'EXTRA_PERMISSION',undefined]] as const){
   const h=await harness();h.reader.authorize('1',ack);h.setResponse({status:200,headers:{},body:JSON.stringify(body)});await h.reader.sync();const d=h.reader.getDiagnostic();
   assert.equal(d.permissionReason,reason);assert.equal(h.reader.getStatus().connected,false);assert.ok(!h.calls.includes('/api/v3/account'));
   if(field)assert.equal(d.permissionFields?.[0].field,field);assert.ok(!/TEST_SECRET|signature/.test(JSON.stringify(d)));
@@ -103,8 +103,13 @@ test('SDK超时和断开后的迟到429仍建立冷却，较长Retry-After不降
 });
 test('直接请求只读权限白名单、固定签名构造',()=>{
  assert.doesNotThrow(()=>assertReadOnly(permissions));
- for(const value of [{...permissions,enableWithdrawals:true},{...permissions,enableReading:false},{...permissions,ipRestrict:false},{...permissions,enableNewTrading:true},{enableReading:true}])assert.throws(()=>assertReadOnly(value));
+ for(const value of [{...permissions,enableWithdrawals:true},{...permissions,enableReading:false},{...permissions,ipRestrict:'false'},{...permissions,enableNewTrading:true},{enableReading:true}])assert.throws(()=>assertReadOnly(value));
  const req=restrictionRequest('FAKE','FAKE',123);assert.equal(new URL(req.url).pathname,'/sapi/v1/account/apiRestrictions');assert.equal(req.method,'GET');
+});
+test('本人选择小额纯只读无强制IP：false可读，字段缺失/额外权限仍拒绝',async()=>{
+ assert.doesNotThrow(()=>assertReadOnly({...permissions,ipRestrict:false}));
+ for(const value of [{...permissions,ipRestrict:undefined},{...permissions,ipRestrict:false,enableReading:false},{...permissions,ipRestrict:false,enableWithdrawals:true},{...permissions,ipRestrict:false,enableNewTrading:true}])assert.throws(()=>assertReadOnly(value));
+ const h=await harness();h.reader.authorize('1',ack);h.setMode('no-ip');await h.reader.sync();assert.equal(h.reader.getStatus().success,true);assert.equal(h.reader.valued().report.coveredSubtotal,'65.00000000');
 });
 test('必须本人确认；权限先于余额；真实来源、缺价与重复不累加',async()=>{
  const h=await harness();await assert.rejects(h.reader.sync());assert.equal(h.calls.length,0);

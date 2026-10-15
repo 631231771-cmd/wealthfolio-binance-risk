@@ -8,7 +8,7 @@ import { assetKey, calculateRisk, type PortfolioState } from './domain';
 export const DIRECT_INTERVAL=300_000, DIRECT_TTL=360_000;
 const blocked=['enableWithdrawals','enableInternalTransfer','enableMargin','enableFutures','permitsUniversalTransfer','enableVanillaOptions','enableFixApiTrade','enableSpotAndMarginTrading','enablePortfolioMarginTrading'];
 export const READ_ONLY_FIELDS=['enableReading','ipRestrict',...blocked,'enableFixReadOnly'];
-export type PermissionReason='READING_DISABLED'|'IP_ALLOWLIST_DISABLED'|'EXTRA_PERMISSION'|'PERMISSION_FIELDS_INCOMPLETE';
+export type PermissionReason='READING_DISABLED'|'EXTRA_PERMISSION'|'PERMISSION_FIELDS_INCOMPLETE';
 interface PermissionField {field:string;value:boolean|null}
 class ReadOnlyError extends Error {
   constructor(readonly code:PermissionReason,readonly fields:PermissionField[]){super(code);}
@@ -19,7 +19,7 @@ export function assertReadOnly(value:unknown):void {
   const missing=required.filter(k=>!p||typeof p[k]!=='boolean');
   if(!p||typeof p!=='object'||Array.isArray(p)||missing.length)throw new ReadOnlyError('PERMISSION_FIELDS_INCOMPLETE',missing.map(field=>({field,value:null})));
   if(p.enableReading!==true)throw new ReadOnlyError('READING_DISABLED',[{field:'enableReading',value:false}]);
-  if(p.ipRestrict!==true)throw new ReadOnlyError('IP_ALLOWLIST_DISABLED',[{field:'ipRestrict',value:false}]);
+  // v0.1.11：本人接受独立小额账户无IP白名单的隐私风险；仍要求此字段明确为布尔值。
   const extra=blocked.filter(k=>p[k]===true);
   const unknown=Object.entries(p).some(([k,v])=>v===true&&!READ_ONLY_FIELDS.includes(k));
   if(extra.length||unknown)throw new ReadOnlyError('EXTRA_PERMISSION',extra.map(field=>({field,value:true})));

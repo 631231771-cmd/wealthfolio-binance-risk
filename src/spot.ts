@@ -26,7 +26,8 @@ export function classifyResponse(response: MockResponse): void {
   const code=(response.data && typeof response.data==='object') ? (response.data as {code?:unknown}).code : undefined;
   const retry=Number(response.headers?.['Retry-After'] ?? response.headers?.['retry-after']);
   if (response.status===429 || response.status===418) throw new SpotError('rate-limit',Number.isSafeInteger(retry)&&retry>0&&retry<=86400?retry:60);
-  if (response.status===401 || code===-2014 || code===-2015) throw new SpotError('auth');
+  // -2008未列于当前币安公开错误表；CCXT币安适配器将其归类为认证错误。
+  if (response.status===401 || code===-2008 || code===-2014 || code===-2015) throw new SpotError('auth');
   if (response.status===403) throw new SpotError('forbidden');
   if (code===-1022) throw new SpotError('signature');
   if (code===-1021) throw new SpotError('clock');

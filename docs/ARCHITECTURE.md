@@ -116,3 +116,9 @@ DirectSpot新增诊断元数据getter，按既有步骤标记阶段及固定安�
 request在受限正文内先解析整数code再分类；DirectRequestError只携带固定SpotError、HTTP状态及整数业务码，无原始响应/请求/cause。非JSON仍按HTTP分类，429/418在底层响应返回时记录独立cooldownUntil，包括SDK超时/epoch失效后的迟到响应。普通failures/due只控制自动退避，disconnect/authorize可清理普通状态，不能清除限流。retry元数据明确区分限流、普通退避、在途、待本人确认、隐藏和可重试；不增加请求端点或自动重试次数。冷却当前仅会话内保存，不保证跨进程延续。
 
 ReadOnlyError只含固定原因和必要已知字段/布尔状态，缺字段不猜false；所有旧权限策略保留。isSaved仅读取非密钥活动标记，未查询时不读Key/Secret槽。价格展示用Decimal完整有效小数，只有市值/损失格式化两位；资产计算与来源隔离不变。
+
+## v0.1.11用户决定与显示修正
+
+用户明确接受独立小额纯只读无强制IP白名单：仅删除ipRestrict===true条件，保留此字段必须boolean及其他完整/严格只读检查。未知true权限继续拒绝，不改变端点、HMAC、数据与账本边界；四确认权限说明增加无IP隐私风险。
+
+输入区显示改按success而非connected：authorize只表示开始尝试，不能卸载UID/密码/确认DOM；首次进行中/失败保留，同一页面重绘不因连接标志变化卸载，成功快照后隐藏。-2008只新增固定auth分类与安全说明，不携带原始msg，不为定位读取现存密钥。此前所谓“已有凭据”提示改为“存有但尚未验证”。
