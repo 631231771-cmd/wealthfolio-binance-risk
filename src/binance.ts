@@ -5,24 +5,22 @@ import type { NetworkRequest } from '@wealthfolio/addon-sdk';
 import { nonnegative, type Snapshot, type Account } from './domain';
 
 export const READ_ENDPOINTS = {
-  spot: { method: 'GET', path: '/api/v3/account' },
-  funding: { method: 'POST', path: '/sapi/v1/asset/get-funding-asset' }
+  spot: { method: 'GET', path: '/api/v3/account' }
 } as const;
 export function signPayload(payload: string, secret: string): string {
   return bytesToHex(hmac(sha256, utf8ToBytes(secret), utf8ToBytes(payload)));
 }
-// 仅构造请求；本阶段没有私人账户发送函数，也没有真实密钥输入界面。
-export function buildOfflineReadRequest(kind: keyof typeof READ_ENDPOINTS, apiKey: string, secret: string, timestamp: number): NetworkRequest {
+// Request construction is fixture-only; the live authenticated send path stays hard-blocked.
+export function buildOfflineReadRequest(kind: 'spot', apiKey: string, secret: string, timestamp: number): NetworkRequest {
   if (!Number.isSafeInteger(timestamp) || timestamp <= 0 || !apiKey || !secret) throw new Error('签名输入无效');
   const endpoint = READ_ENDPOINTS[kind];
   if (!endpoint) throw new Error('不允许的接口');
-  const body = `timestamp=${timestamp}&recvWindow=5000`;
-  const signed = `${body}&signature=${signPayload(body, secret)}`;
+  const payload = 'timestamp=' + timestamp + '&recvWindow=5000';
+  const signed = payload + '&signature=' + signPayload(payload, secret);
   return {
-    method: endpoint.method,
-    url: `https://api.binance.com${endpoint.path}${endpoint.method === 'GET' ? '?' + signed : ''}`,
-    headers: { 'X-MBX-APIKEY': apiKey, 'Content-Type': 'application/x-www-form-urlencoded' },
-    ...(endpoint.method === 'POST' ? { body: signed } : {})
+    method: 'GET',
+    url: 'https://api.binance.com' + endpoint.path + '?' + signed,
+    headers: { 'X-MBX-APIKEY': apiKey }
   };
 }
 export function normalizeFixtureBalances(kind: 'spot' | 'funding', response: unknown, accountId: string, batchId: string, asOf: string): Snapshot {

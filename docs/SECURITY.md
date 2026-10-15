@@ -55,3 +55,13 @@ fixture 保留手算；external 解析入口不继承模拟报价/成本或 demo
 v0.1.4 增量：Spot 仅固定假凭据与模拟传输，不增加权限，真实发送仍阻断。重新核查 v3.9.1 network.rs:103/121 与 tauri/core.ts:55，风险未解决。最小上游方向是在返回前移除 reqwest URL（如 without_url）并只暴露已批准错误码，官方发行版落地后以批准的 HTTPS 假请求故障验证所有日志路径。本项目不改宿主，不用插件 catch 或关闭日志假装解决。官方 GET account 参数在 query，不能假定改 POST 或移入 body 就兼容。SDK 没有已验证托管 HMAC 代替方案。下一轮优先 REVIEW-PACKET 和增量补丁。
 
 先将代码、SECURITY 与 VALIDATION 交 Astra 复审。只做官方代理假签名故障链路和资料库 AI 拒绝读工具的独立验收；日志未解决前不申请真实 Key。Funding 口径、内部划转一致性、Stocks 继续阻塞，不能因为 Spot 单账户样例通过就宣称三类账户可用。
+
+## 2026-10-15 签名 URL 错误日志复核
+
+已按 Wealthfolio v3.9.1 官方源码检查：前端 `apps/frontend/src/adapters/tauri/core.ts` 会把 `invoke` 的拒绝值转成字符串写入日志；`apps/frontend/src/adapters/shared/addon-network.ts` 将完整 request 交给 Tauri；Rust `crates/core/src/addons/network.rs` 对 reqwest 发送和响应分块错误使用 `e.to_string()`。该锁定版本的 reqwest 0.12.28 `Display` 会追加完整 URL，并提供 `without_url()`；当前宿主没有调用它。
+
+宿主 `network-audit.jsonl` 只记录 scheme、host、port、状态或错误码，不记录 query；这不能抵消前端 `invoke` 日志。签名在 URL query 中，因此网络/DNS/TLS/超时等拒绝可能把 `timestamp`、`recvWindow` 和 `signature` 写入宿主日志。插件无法在宿主写日志之前捕获并脱敏；忽略错误或只隐藏界面文本不能解决。
+
+当前插件因此保留无 transport 参数的 `requestAuthenticated()` 硬阻断。修复条件：官方宿主在发送和读取响应分块的错误路径移除 URL 后再返回/记录错误，并在对应 Windows 版本核验真实日志不含 `signature=`；之后仍需用户单独授权真实认证请求。此轮没有修改 Wealthfolio 主程序，也没有发送真实认证请求。
+
+源码：[`core.ts`](https://github.com/wealthfolio/wealthfolio/blob/v3.9.1/apps/frontend/src/adapters/tauri/core.ts)、[`addon-network.ts`](https://github.com/wealthfolio/wealthfolio/blob/v3.9.1/apps/frontend/src/adapters/shared/addon-network.ts)、[`network.rs`](https://github.com/wealthfolio/wealthfolio/blob/v3.9.1/crates/core/src/addons/network.rs)、[`service.rs`](https://github.com/wealthfolio/wealthfolio/blob/v3.9.1/crates/core/src/addons/service.rs)、[reqwest 0.12.28 Error](https://github.com/seanmonstar/reqwest/blob/v0.12.28/src/error.rs)。

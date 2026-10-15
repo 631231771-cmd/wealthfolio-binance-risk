@@ -1,7 +1,7 @@
 {
   "id": "wealthfolio-binance-risk",
   "name": "币安风险 · 模拟验证",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "真实公开行情与模拟持仓估值；私人认证保持阻断，无主程序资产权限。",
   "author": "个人项目",
   "main": "dist/addon.js",
@@ -38,7 +38,7 @@
         "get",
         "delete"
       ],
-      "purpose": "仅固定假凭据安全存储生命周期验证；无真实输入或认证请求"
+      "purpose": "本机 Binance Spot API Key/Secret 仅通过官方 secrets 保存、读取和删除"
     },
     {
       "category": "files",
@@ -52,7 +52,7 @@
       "functions": [
         "request"
       ],
-      "purpose": "只读取指定官方主机的time、exchangeInfo及ticker公开GET；不读取凭据或账户"
+      "purpose": "仅公开行情 time/exchangeInfo/ticker/price 的 GET；不发送认证请求或读取账户"
     }
   ],
   "network": {

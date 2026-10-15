@@ -1,5 +1,13 @@
 # 当前状态
-日期：2026-10-15。唯一根目录 F:\Code\风控。源码/安装包 v0.1.6；开发分支 feature/spot-readonly-offline，前基线 f07cf33/v0.1.5。main仍保留91f3432/v0.1.3；本轮已授权提交/推送，仅开发分支，具体提交和CI见git及本地CI记录。
+日期：2026-10-15；唯一项目根目录 F:\Code\风控。开发候选 v0.1.7 基于 v0.1.6 提交 e7fcadc；分支 feature/spot-readonly-offline。已授权提交/推送该私有开发分支，但环境将当前 .git 设为只读，git add 无法创建 index.lock；GitHub 写入工具又要求本环境不可用的审批。本轮改动尚未提交或推送，文件仍在本地工作区。
+
+## 本轮进展
+- 增加本机 Binance Spot API Key/Secret 界面与独立 secrets 键；输入保存后清空，只显示已保存/未保存/未知状态。没有写普通存储或模拟备份。
+- 仅保留离线构造的 Spot GET /api/v3/account；真实认证发送入口和界面按钮均硬阻断。网络主机仍只有 v0.1.6 的公开行情主机。
+- 增加新鲜公开 USDT 报价应用到 external Spot 数量的计算入口；不混入模拟数量，未知/缺价资产保留为未定价。
+- 已复核 Wealthfolio v3.9.1 签名 URL 错误日志风险，证据与修复条件见 docs/SECURITY.md。宿主未修复前不做真实认证请求。
+- 本轮自动验证：typecheck、90 项测试、build、独立 smoke 通过；npm run verify 在 package 阶段受本机 PowerShell ExecutionPolicy 阻断，未绕过。未完成真实桌面 UI 验收；没有使用真实凭据或发送真实请求。
+
 
 ## 已完成且验证
 - 公开行情已实现且真实联网：官方network.request，仅data-api.binance.vision、GET time/exchangeInfo/ticker/price。BTC/ETH/BNB/SOL/DOGE的明确USDT市场与报价成功；无API Key、Secret、auth、签名、账户请求或后台采集。
@@ -18,4 +26,4 @@
 - 结束时公开会话已断开，离线会话未采集；假凭据仍由用户此前流程保留，本轮未读取/更改/删除。
 
 ## 下一步唯一优先任务
-等待用户确认下一轮范围：先决定签名日志阻塞的受支持解决路线，再考虑小额独立Spot只读测试。当前停止，不连接真实账户，不索取密钥。
+恢复当前仓库 .git 写权限后，将本轮已审阅改动提交并推送 feature/spot-readonly-offline；随后用虚构凭据完成 Wealthfolio Windows 实机保存/重启读回/删除验收，并等待官方宿主修复及核验签名 URL 错误日志。上述安全条件通过后，再由用户单独授权真实 Spot 只读请求。认证发送继续硬阻断。

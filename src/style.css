@@ -6,3 +6,6 @@ button:disabled { opacity: .5; cursor: default; }
 table { width: 100%; border-collapse: collapse; margin: 18px 0; }
 th,td { text-align: left; border-bottom: 1px solid #8885; padding: 8px; overflow-wrap: anywhere; }
 textarea { display: block; width: 100%; min-height: 80px; margin: 8px 0; }
+
+.credential-panel label { display: block; margin: 12px 0; }
+.credential-panel input { display: block; width: min(100%, 520px); box-sizing: border-box; margin-top: 6px; padding: 8px; }

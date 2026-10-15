@@ -15,6 +15,9 @@ await enable({api:{storage:{get:async()=>null},toast:{error:()=>{}}},router:{add
 assert.equal(route.id,manifest.contributes.routes[0].id);
 assert.equal(route.path,`/addons/${manifest.id}`);
 const html=renderToStaticMarkup(createElement(route.component));
+assert.equal((html.match(/type="password"/g)??[]).length,2);
+assert.ok(html.includes('读取 Spot 余额（安全检查未通过）'));
+assert.ok(html.includes('本机凭据状态未知。'));
 assert.ok(html.includes('Binance Stocks'));assert.ok(html.includes('unsupported'));
 assert.ok(html.includes('模拟同步'));assert.ok(html.includes('不可用'));
 // 实际编译入口的显示回归；不把静态渲染当作 Windows 实测。

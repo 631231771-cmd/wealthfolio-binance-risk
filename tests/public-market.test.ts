@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import type { NetworkRequest, NetworkResponse } from '@wealthfolio/addon-sdk';
-import { PublicMarketReader, PublicMarketError, PUBLIC_ORIGIN, publicMarketRequest, publicMarketRisk } from '../src/public-market';
+import { PublicMarketReader, PublicMarketError, PUBLIC_ORIGIN, mergePublicSpotPrices, publicMarketRequest, publicMarketRisk } from '../src/public-market';
 import { multiExchangeInfo, MULTI_PRICES } from '../src/spot-fixture';
+import { spotSnapshot, spotRisk } from '../src/spot';
 const NOW=Date.parse('2026-10-14T00:00:00Z');
 const response=(data:unknown,status=200,headers:Record<string,string>={}):NetworkResponse=>({status,body:JSON.stringify(data),headers});
 function fixture() {
@@ -42,6 +43,29 @@ test('清单仅增加唯一精确主机网络request，无use或宿主资产权�
   assert.deepEqual(manifest.permissions.map((p:any)=>p.category),['secrets','files','network']);
   assert.deepEqual(manifest.permissions.find((p:any)=>p.category==='network').functions,['request']);
   assert.deepEqual(manifest.permissions.find((p:any)=>p.category==='secrets').functions,['set','get','delete']);
+});
+test('将公开报价应用到外部 Spot 数量，不带入模拟数量；未知资产与旧价未定价',async()=>{
+  const f=fixture();await f.reader.refresh();
+  const at=new Date(NOW).toISOString();
+  const parsed=spotSnapshot({uid:42,accountType:'SPOT',balances:[
+    {asset:'BTC',free:'0.4',locked:'0'},{asset:'ETH',free:'2',locked:'0'},
+    {asset:'USDT',free:'4000',locked:'0'},{asset:'UNSUPPORTED',free:'3',locked:'0'}
+  ]},'external',at,at);
+  parsed.snapshot.positions.find(p=>p.asset.code==='UNSUPPORTED')!.price={value:'9',currency:'USDT',asOf:at,source:'external:old quote'};
+  const quoted=mergePublicSpotPrices(parsed.account,parsed.snapshot,f.reader.getState(),NOW);
+  assert.deepEqual(quoted.positions.map(p=>p.quantity),['0.4','2','4000','3']);
+  assert.equal(quoted.dataMode,'external');
+  assert.equal(quoted.positions.find(p=>p.asset.code==='BTC')!.price!.value,MULTI_PRICES.BTC);
+  assert.equal(quoted.positions.find(p=>p.asset.code==='USDT')!.price!.source,'unit:USDT/USDT');
+  assert.equal(quoted.positions.find(p=>p.asset.code==='UNSUPPORTED')!.price,undefined);
+  const state={schemaVersion:1 as const,accounts:[parsed.account],snapshots:{[parsed.account.id]:quoted},statuses:{[parsed.account.id]:{state:'ready' as const,attemptedAt:at}}};
+  assert.equal(spotRisk(state,NOW).coveredSubtotal,'29000.00000000');
+  assert.equal(spotRisk(state,NOW).coverage,'partial');
+  f.set('503');await assert.rejects(f.reader.refresh());
+  const afterFailure=mergePublicSpotPrices(parsed.account,quoted,f.reader.getState(),NOW);
+  assert.equal(afterFailure.positions.find(p=>p.asset.code==='BTC')!.price,undefined);
+  assert.equal(afterFailure.positions.find(p=>p.asset.code==='USDT')!.price!.value,'1');
+  assert.throws(()=>mergePublicSpotPrices({...parsed.account,id:'demo-spot'},parsed.snapshot,f.reader.getState(),NOW));
 });
 test('真实SDK body契约、采集时间与fixture数量隔离；公开链路无凭据能力',async()=>{
   const f=fixture();await f.reader.refresh();assert.equal(f.requests.length,3);

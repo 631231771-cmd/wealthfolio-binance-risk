@@ -80,3 +80,9 @@ src/public-market.ts 独立接收SDK network.request能力，不接收ctx/secret
 数据流：手动刷新→time→exchangeInfo→ticker/price→external来源/采集时间报价→fixture固定数量快照→通用风险纯函数。采集起止是报价请求时间，不是私人余额采集时间；表头明确区分。120秒过期、失败/断开不发布当前值；历史报价仅作历史参考。缺行不沿用上次价格，保留模拟数量并显示partial。USDT1只是同币计价，不建立USD汇率。
 
 状态仅内存，卸载页面断开；不写主程序/storage/旧备份。SDK没有AbortSignal，15秒UI超时后仍阻止重叠请求直到宿主promise结束；断开epoch拒绝迟到结果。仅允许手动重试。宿主精确批准主机/HTTPS/禁止重定向；插件固定GET/路径，不能说宿主权限也限制了路径。证据见 PUBLIC-MARKET-PREP；模拟断网不是 OS 或原生网络故障验收。
+
+## 本机 Spot 凭据准备
+
+`BinanceCredentials` 只使用独立的 `risk-binance-spot-*` secrets 键；界面只显示是否已保存，输入框为密码型非受控字段，保存后立即清空。它不写普通 storage 或模拟导出。
+
+`buildOfflineReadRequest` 只构造 Spot `GET /api/v3/account`，测试使用虚构凭据与工厂 mock。实际认证入口没有 network 参数并保持硬阻断。`mergePublicSpotPrices` 只从成功且未过期的 v0.1.6 公开行情提取价格，保留 external 余额数量，删除旧价；USDT 按 USDT 计价单位处理，缺行情资产保留未定价。

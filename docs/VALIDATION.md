@@ -291,3 +291,15 @@ main/v0.1.3 保存基线提交 91f3432；本轮 feature/spot-readonly-offline �
 - 实际OS断网、原生代理HTTP429/418/503、原生超时/迟到返回尚未复现；这些有mock测试，不能写成Windows原生故障全部通过。本轮未复验假凭据生命周期/桌面备份恢复；历史结果保留。
 - 签名URL日志问题未解决；真实账户仍硬阻断。AI逐资料库工具隔离、真实只读权限、凭据错误路径与真实余额/身份/价格对账、真实备份仍是前置条件。Funding四字段不相加，跨钱包完整合计不保证，Stocks unsupported；未调用Astra。
 - 本轮修改public-market.ts/test（新增）、addon.tsx、smoke-package、版本/锁/manifest、README/AGENTS及架构/验证/Windows/公开行情/Git/CURRENT文档；不引入依赖或服务、不改旧风险和认证模块。历史v0.1.5实机记录一并提交，不能倒填v0.1.4。
+
+## 2026-10-15 本机 Spot 凭据准备（v0.1.7 开发候选）
+
+- 环境：Windows PowerShell，Node v24.17.0。
+- npm run typecheck：通过。
+- npm test：90/90 通过，覆盖虚构凭据读写/替换/删除失败、Spot GET 构造约束、外部余额与公开价格合并、缺价保留及认证发送硬阻断。
+- npm run build：通过。
+- npm run smoke：通过；检查编译入口、两处密码型输入、状态未知显示及禁用的真实余额按钮。此为静态渲染，不代表桌面安装。
+- npm run verify：类型检查、90 项测试和构建通过；打包时本机 PowerShell ExecutionPolicy 拒绝运行生成的 artifacts/package.ps1，因此该命令未到 smoke/receipt。未绕过系统策略；独立 smoke 已通过。
+- 本轮未完成 Wealthfolio Windows 实机假凭据 UI 生命周期验收；未发送私人 API 请求，未输入真实密钥。
+
+- 提交/推送：用户已授权，但本机 `.git` 挂载只读，`git add` 因无法创建 `.git/index.lock` 失败；GitHub 写入接口要求本环境不可用的审批，远端分支未改动。文件修改保留在本地工作区，待恢复仓库写权限后提交。

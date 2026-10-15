@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, request } from 'node:http';
-import { DummyCredentials, DUMMY, requestAuthenticated } from '../src/credentials';
+import { BinanceCredentials, DummyCredentials, DUMMY, requestAuthenticated } from '../src/credentials';
 import { parseExternalSpot, parseExternalFunding, buildOfflineReadRequest } from '../src/binance';
 import { calculateRisk, applyBatch, type Account, type PortfolioState, type FxRate, DEFAULT_FRESHNESS } from '../src/domain';
 import { exportState, restoreState, sanitizeFixtureState } from '../src/backup';
@@ -15,6 +15,47 @@ function fakeSecrets() {
       set:async(key:string,value:string)=>{if(key===failKey){failKey='';if(afterWrite)values.set(key,value);throw new Error(value);}values.set(key,value);},
       delete:async(key:string)=>{if(key===failDeleteKey){failDeleteKey='';throw new Error(DUMMY[1].apiKey);}values.delete(key);}}};
 }
+test('本机 Binance 凭据只经 secrets 保存、替换、读回和删除；备份不包含值',async()=> {
+  const host=fakeSecrets(), c=new BinanceCredentials(host.api);
+  const first={version:1 as const,apiKey:'FAKE_API_KEY_WINDOWS',secret:'FAKE_SECRET_WINDOWS'};
+  assert.equal(await c.isSaved(),false);
+  await c.save(first.apiKey,first.secret);
+  assert.deepEqual(await c.read(),first);
+  assert.ok([...host.values.keys()].every(key=>/^risk-binance-spot-(active|slot-[ab])-v1$/.test(key)));
+  const next={version:1 as const,apiKey:'FAKE_API_KEY_ROTATED',secret:'FAKE_SECRET_ROTATED'};
+  await c.save(next.apiKey,next.secret);
+  assert.deepEqual(await new BinanceCredentials(host.api).read(),next);
+  const backup=exportState(syncedFixture(),null);
+  for(const value of [first.apiKey,first.secret,next.apiKey,next.secret]) assert.equal(backup.includes(value),false);
+  await c.disconnectAndDelete();
+  assert.equal(await new BinanceCredentials(host.api).isSaved(),false);
+  assert.equal(host.values.size,0);
+});
+test('本机凭据保存失败不泄露值并保持旧凭据；删除失败时保持断开',async()=> {
+  const host=fakeSecrets(), c=new BinanceCredentials(host.api);
+  await c.save('FAKE_KEY_OLD','FAKE_SECRET_OLD');
+  host.fail('risk-binance-spot-slot-b-v1',true);
+  await assert.rejects(c.save('FAKE_KEY_NEW','FAKE_SECRET_NEW'),error=>!String(error).includes('FAKE_KEY_NEW')&&!String(error).includes('FAKE_SECRET_NEW'));
+  assert.equal(host.values.has('risk-binance-spot-slot-b-v1'),false);
+  assert.deepEqual(await new BinanceCredentials(host.api).read(),{version:1,apiKey:'FAKE_KEY_OLD',secret:'FAKE_SECRET_OLD'});
+  host.failDelete('risk-binance-spot-slot-a-v1');
+  await assert.rejects(c.disconnectAndDelete(),/断开/);
+  assert.equal(await new BinanceCredentials(host.api).isSaved(),false);
+  await c.disconnectAndDelete();
+});
+test('本机凭据拒绝空值、首尾空格和超长输入',async()=> {
+  const host=fakeSecrets(), c=new BinanceCredentials(host.api);
+  for(const pair of [['','x'],['x',' '],[' x','y'],['x','y '],['x'.repeat(513),'y']] as const) await assert.rejects(c.save(pair[0],pair[1]));
+  assert.equal(host.values.size,0);
+});
+test('断开标记写入失败时不宣称已经断开',async()=> {
+  const host=fakeSecrets(), c=new BinanceCredentials(host.api);
+  await c.save('FAKE_KEY','FAKE_SECRET');
+  host.fail('risk-binance-spot-active-v1',false);
+  await assert.rejects(c.disconnectAndDelete(),/连接状态无法确认/);
+  assert.equal(await c.isSaved(),true);
+  await c.disconnectAndDelete();
+});
 test('官方 secrets 契约替身：假凭据保存、读回、重建控制器、替换、删除 null',async()=> {
   const host=fakeSecrets(), c=new DummyCredentials(host.api);
   assert.equal(await c.read(),null);await c.save(1);assert.deepEqual(await c.read(),DUMMY[1]);
@@ -36,7 +77,7 @@ test('部分删除失败明确错误；重启不恢复活动凭据，重试清�
   const host=fakeSecrets(), c=new DummyCredentials(host.api);await c.save(1);host.failDelete('risk-dummy-slot-a-v1');
   await assert.rejects(c.disconnectAndDelete(),/保持断开/);assert.equal(await new DummyCredentials(host.api).read(),null);
   await c.disconnectAndDelete();assert.equal(host.values.size,0);
-  let called=false;await assert.rejects(requestAuthenticated(()=>called=true),/阻断/);assert.equal(called,false);
+  await assert.rejects(requestAuthenticated());
 });
 test('凭据只有固定插件 secrets 键；没有普通 storage 或任意他插件命名空间',async()=> {
   const host=fakeSecrets(), c=new DummyCredentials(host.api);await c.save(1);
@@ -138,7 +179,7 @@ test('模拟签名异常全链路替身：宿主先记 URL，界面脱敏不够�
     // 负对照模拟 reqwest 风格错误及宿主 invoke 日志，不运行官方 Rust/代理。
     let display='';try {await mockBroker();}catch {display='固定安全错误';}
     assert.equal(received,1);assert.ok(logs[0].includes('signature='));assert.equal(display.includes('signature='),false);
-    logs.length=0;await assert.rejects(requestAuthenticated(mockBroker),/阻断/);
+    logs.length=0;await assert.rejects(requestAuthenticated(),/阻断/);
     assert.equal(received,1);assert.deepEqual(logs,[]);
   } finally {await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });

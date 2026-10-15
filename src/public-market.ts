@@ -1,5 +1,5 @@
 import type { NetworkAPI, NetworkRequest, NetworkResponse } from '@wealthfolio/addon-sdk';
-import { assetKey, calculateRisk, type PortfolioState } from './domain';
+import { assetKey, calculateRisk, validateSnapshot, type Account, type PortfolioState, type Snapshot } from './domain';
 import { parseTickerPrices, parseUsdtMarkets, publicTickerRequest } from './spot-quotes';
 
 export const PUBLIC_ORIGIN='https://data-api.binance.vision';
@@ -80,4 +80,41 @@ export class PublicMarketReader {
 export function publicMarketRisk(state:PortfolioState,now:number) {
   const shocks=Object.fromEntries(Object.values(state.snapshots).flatMap(s=>s.positions.map(p=>[assetKey(p.asset),p.asset.code==='USDT'?'0':'-0.2'])));
   return calculateRisk(state,'USDT',[],shocks,{now:new Date(now).toISOString(),balanceMaxAgeMs:PUBLIC_TTL_MS,priceMaxAgeMs:PUBLIC_TTL_MS,fxMaxAgeMs:300_000,enforceFixtureFreshness:true});
+}
+
+// Merge only fresh public prices; simulated quote quantities never enter the external balance.
+export function mergePublicSpotPrices(account: Account, balance: Snapshot, quoteState: PortfolioState, now: number): Snapshot {
+  if (!Number.isFinite(now) || account.platform !== 'binance' || account.kind !== 'spot' ||
+      !account.sourceAccountId || account.id.startsWith('demo-') || balance.accountId !== account.id ||
+      balance.dataMode !== 'external' || !balance.collectionStartedAt || !balance.collectionEndedAt) {
+    throw new Error('外部 Spot 余额来源无效');
+  }
+  const quoteStatus = quoteState.statuses[ID];
+  const quoteSnapshot = quoteState.snapshots[ID];
+  const prices = new Map<string, NonNullable<Snapshot['positions'][number]['price']>>();
+  if (quoteStatus?.state === 'ready' && quoteSnapshot?.dataMode === 'fixture') {
+    for (const position of quoteSnapshot.positions) {
+      const price = position.price;
+      if (position.asset.venue !== 'BINANCE' || position.asset.type !== 'crypto' ||
+          position.asset.quoteCurrency !== 'USDT' || !price || price.currency !== 'USDT' ||
+          !price.source.startsWith('external:' + PUBLIC_ORIGIN + '/api/v3/ticker/price')) continue;
+      const at = Date.parse(price.asOf);
+      if (!Number.isFinite(at) || at > now || now - at > PUBLIC_TTL_MS) continue;
+      prices.set(position.asset.code, price);
+    }
+  }
+  const snapshot: Snapshot = {
+    ...balance,
+    positions: balance.positions.map(position => {
+      const { price: _oldPrice, ...unpriced } = position;
+      if (position.asset.code === 'USDT' && position.asset.quoteCurrency === 'USDT') {
+        return { ...unpriced, price: { value: '1', currency: 'USDT', asOf: balance.collectionEndedAt!, source: 'unit:USDT/USDT' } };
+      }
+      if (position.asset.quoteCurrency !== 'USDT') return unpriced;
+      const quote = prices.get(position.asset.code);
+      return quote ? { ...unpriced, price: { ...quote } } : unpriced;
+    })
+  };
+  validateSnapshot(snapshot);
+  return snapshot;
 }

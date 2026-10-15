@@ -1,6 +1,115 @@
 import type { HostAPI } from '@wealthfolio/addon-sdk';
+// Fixed fake credentials below are separate from the local Binance credential manager.
+export interface BinanceCredentialPair {
+  version: 1;
+  apiKey: string;
+  secret: string;
+}
 
-// 仅用于安全生命周期验收；没有真实凭据输入或认证发送能力。
+const REAL_ACTIVE = 'risk-binance-spot-active-v1';
+const REAL_SLOTS = { a: 'risk-binance-spot-slot-a-v1', b: 'risk-binance-spot-slot-b-v1' } as const;
+type RealSlot = keyof typeof REAL_SLOTS;
+
+function decodeReal(text: string | null): BinanceCredentialPair | null {
+  if (text === null) return null;
+  try {
+    const value = JSON.parse(text) as Partial<BinanceCredentialPair>;
+    if (value.version !== 1 || typeof value.apiKey !== 'string' || typeof value.secret !== 'string' ||
+        !value.apiKey || !value.secret || value.apiKey.length > 512 || value.secret.length > 512 ||
+        value.apiKey !== value.apiKey.trim() || value.secret !== value.secret.trim()) throw new Error();
+    return { version: 1, apiKey: value.apiKey, secret: value.secret };
+  } catch {
+    throw new Error('本机 Spot 凭据格式无效；连接已断开');
+  }
+}
+
+// Real credentials use only the host secrets capability. They never enter addon storage or UI state.
+export class BinanceCredentials {
+  private busy = false;
+  constructor(private readonly secrets: Pick<HostAPI['secrets'], 'set' | 'get' | 'delete'>) {}
+
+  async read(): Promise<BinanceCredentialPair | null> {
+    try {
+      const active = await this.secrets.get(REAL_ACTIVE);
+      if (active === null || active === 'disconnected') return null;
+      if (active !== 'a' && active !== 'b') throw new Error();
+      const value = decodeReal(await this.secrets.get(REAL_SLOTS[active]));
+      if (!value) throw new Error();
+      return value;
+    } catch {
+      throw new Error('无法读取本机 Spot 凭据；连接已断开');
+    }
+  }
+
+  async isSaved(): Promise<boolean> {
+    return (await this.read()) !== null;
+  }
+
+  async save(apiKey: string, secret: string): Promise<void> {
+    if (this.busy) throw new Error('凭据操作正在进行');
+    if (typeof apiKey !== 'string' || typeof secret !== 'string' || !apiKey || !secret ||
+        apiKey.length > 512 || secret.length > 512 || apiKey !== apiKey.trim() || secret !== secret.trim()) {
+      throw new Error('请填写有效的 API Key 和 Secret');
+    }
+    this.busy = true;
+    let old: string | null = null, commitAttempted = false, candidate: RealSlot | null = null;
+    try {
+      old = await this.secrets.get(REAL_ACTIVE);
+      if (old !== null && !['a', 'b', 'disconnected'].includes(old)) throw new Error();
+      if (old === 'a' || old === 'b') decodeReal(await this.secrets.get(REAL_SLOTS[old]));
+      candidate = old === 'a' ? 'b' : 'a';
+      const encoded = JSON.stringify({ version: 1, apiKey, secret } satisfies BinanceCredentialPair);
+      await this.secrets.set(REAL_SLOTS[candidate], encoded);
+      if (await this.secrets.get(REAL_SLOTS[candidate]) !== encoded) throw new Error();
+      commitAttempted = true;
+      await this.secrets.set(REAL_ACTIVE, candidate);
+      if (await this.secrets.get(REAL_ACTIVE) !== candidate) throw new Error();
+    } catch {
+      if (commitAttempted) {
+        try {
+          await this.secrets.set(REAL_ACTIVE, old ?? 'disconnected');
+          if (await this.secrets.get(REAL_ACTIVE) !== (old ?? 'disconnected')) throw new Error();
+        } catch {
+          throw new Error('本机凭据切换状态无法确认；请检查后重试。认证请求仍被硬阻断');
+        }
+      }
+      if (candidate) {
+        try {
+          await this.secrets.delete(REAL_SLOTS[candidate]);
+          if (await this.secrets.get(REAL_SLOTS[candidate]) !== null) throw new Error();
+        } catch {
+          throw new Error('新凭据保存失败，临时凭据清理未确认；请重试。认证请求仍被硬阻断');
+        }
+      }
+      throw new Error('新凭据保存失败；旧版本保持活动。没有发送认证请求');
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  async disconnectAndDelete(): Promise<void> {
+    if (this.busy) throw new Error('凭据操作正在进行；请稍后重试');
+    this.busy = true;
+    let markedDisconnected = false;
+    try {
+      await this.secrets.set(REAL_ACTIVE, 'disconnected');
+      if (await this.secrets.get(REAL_ACTIVE) !== 'disconnected') throw new Error();
+      markedDisconnected = true;
+      for (const key of Object.values(REAL_SLOTS)) await this.secrets.delete(key);
+      for (const key of Object.values(REAL_SLOTS)) if (await this.secrets.get(key) !== null) throw new Error();
+      await this.secrets.delete(REAL_ACTIVE);
+      if (await this.secrets.get(REAL_ACTIVE) !== null) throw new Error();
+    } catch {
+      throw new Error(markedDisconnected
+        ? '本机凭据未全部删除；断开标记已确认，请重试'
+        : '本机凭据删除未完成；连接状态无法确认，请重试');
+    } finally {
+      this.busy = false;
+    }
+  }
+}
+
+// Fixed fake credentials are used only by the offline fixture reader.
 export const DUMMY = {
   1: { version: 1, apiKey: 'WRISK_FAKE_KEY_V1', secret: 'WRISK_FAKE_SECRET_V1' },
   2: { version: 2, apiKey: 'WRISK_FAKE_KEY_V2', secret: 'WRISK_FAKE_SECRET_V2' }
@@ -69,7 +178,8 @@ export class DummyCredentials {
   }
 }
 
-// 永久关闭本阶段认证发送，既不读取凭据也不进入宿主网络/日志链路。
-export async function requestAuthenticated(_broker?: unknown): Promise<never> {
-  throw new Error('认证请求已阻断：签名日志保护、余额口径及隐私验收未完成');
+// No caller can reach a host transport until the host logging gate is fixed and separately authorized.
+// This remains a hard stop until Wealthfolio sanitizes signed-URL errors and the user separately authorizes a real request.
+export async function requestAuthenticated(): Promise<never> {
+  throw new Error('真实 Spot 请求已硬阻断：宿主错误日志可能包含签名 URL；需先修复并验证宿主日志脱敏');
 }

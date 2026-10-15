@@ -17,12 +17,15 @@ test('签名与 Node 独立实现一致，签名的是实际序列化参数', ()
   const url=new URL(spot.url); const sig=url.searchParams.get('signature'); url.searchParams.delete('signature');
   assert.equal(sig,signPayload(url.search.slice(1),'fixture-only-secret'));
 });
-test('请求白名单只有现货与资金余额，无下单、提现、划转或股票持仓伪接口', () => {
-  assert.deepEqual(Object.keys(READ_ENDPOINTS),['spot','funding']);
-  const request=buildReadRequest('funding','fake-key','fake-secret',1770736694138);
-  assert.equal(request.method,'POST'); assert.equal(request.url,'https://api.binance.com/sapi/v1/asset/get-funding-asset');
-  assert.ok(request.body!.includes('signature='));
-  assert.throws(()=>buildReadRequest('trade' as 'spot','fake','fake',1));
+test('认证请求构造仅限 Spot 余额 GET，不含 body 且不暴露 Funding 路径', () => {
+  assert.deepEqual(Object.keys(READ_ENDPOINTS),['spot']);
+  const request=buildReadRequest('spot','fake-key','fake-secret',1770736694138);
+  assert.equal(request.method,'GET');
+  assert.equal(new URL(request.url).pathname,'/api/v3/account');
+  assert.equal(request.body,undefined);
+  assert.deepEqual(request.headers,{'X-MBX-APIKEY':'fake-key'});
+  assert.throws(()=>(buildReadRequest as any)('funding','fake-key','fake-secret',1770736694138));
+  assert.throws(()=>(buildReadRequest as any)('trade','fake','fake',1));
 });
 test('资金余额保存冻结及提现中分解，模拟数量按照四个桶计算', () => {
   const s=normalizeBalances('funding',[{asset:'BTC',free:'0.1',locked:'0.2',freeze:'0.3',withdrawing:'0.4'}],'funding','batch','2026-10-13T00:00:00Z');
