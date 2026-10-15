@@ -44,6 +44,9 @@ for (const [state,subtotal,stress,time] of cases) {
   if (state===partial || state===missing) assert.ok(rendered.includes('部分覆盖，仅包含当前成功且可估值范围'));
 }
 const bundle=readFileSync(new URL('../dist/addon.js',import.meta.url),'utf8');
+// 旧入口含名为 import 的快照方法且实机加载失败，改名后通过；本包不需要动态 import。
+// 守住已实机通过的语法形态；此检查仍不代替宿主安装验收。
+assert.ok(!/\bimport\s*\(/.test(bundle),'入口不得包含动态 import 或同名方法，避免宿主加载歧义');
 assert.ok(!/\blocalStorage\b|\bsessionStorage\b|\bfetch\s*\(/.test(bundle));
 assert.deepEqual(manifest.permissions.find(p=>p.category==='secrets').functions,['set','get','delete']);
 assert.deepEqual(manifest.permissions.map(p=>p.category),['secrets','files','network']);

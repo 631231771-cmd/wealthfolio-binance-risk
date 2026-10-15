@@ -79,7 +79,7 @@ function BridgePanel({quotes}:{quotes:PublicMarketReader}) {
     <p>来源：{mode==='external'?'真实账户快照（用户本机导入）':mode==='fixture'?'辅助程序虚构验收数据':'未覆盖'}。本区不与任何旧模拟账户合计，不写主程序或备份。只支持一个来源账户；关闭页面清空会话。余额60秒、价格120秒有效；无自动余额同步。</p>
     <p>先在本地读取器生成快照，复制不含凭据的JSON到此处。读取失败也应导入失败快照；禁止粘贴API Key、Secret或完整认证响应。普通快照格式不是来源真实性的加密证明，请只导入自己刚生成的内容。</p>
     <label>本地余额快照<textarea ref={input} autoComplete="off" spellCheck={false}/></label>
-    <button onClick={()=>{try{bridge.import(input.current?.value??'',Date.now());setMessage('快照已处理；请核对来源、数量、UID与时间。');}catch{setMessage('导入失败；历史数量保留，当前不可用。');}finally{if(input.current)input.current.value='';setNow(Date.now());}}}>导入本地余额快照</button>
+    <button onClick={()=>{try{bridge.importSnapshot(input.current?.value??'',Date.now());setMessage('快照已处理；请核对来源、数量、UID与时间。');}catch{setMessage('导入失败；历史数量保留，当前不可用。');}finally{if(input.current)input.current.value='';setNow(Date.now());}}}>导入本地余额快照</button>
     <button disabled={busy} onClick={async()=>{setBusy(true);try{await quotes.refresh();setMessage('真实公开报价已更新；余额数量仍来自本机导入，未发送认证请求。');}catch{setMessage('公开行情失败；保留数量及缺估值提示。');}finally{setNow(Date.now());setBusy(false);}}}>更新公开报价并估值</button>
     <p role="status">{message}</p><p>当前可估值部分：{amount(report.coveredSubtotal)}；完整Spot估值：{amount(report.total)}；情景损失：{amount(report.stressLoss)}；覆盖 {report.coverage}；缺估值 {report.unpricedPositionCount} 条。</p>
     <p>来源账户UID：{state.accounts[0]?.sourceAccountId??'未覆盖'}；余额采集时间：{report.lastKnownSnapshotTimes.join('、')||'无'}；历史可估值部分：{amount(report.lastKnownSubtotal)}（不是当前资产）。</p>

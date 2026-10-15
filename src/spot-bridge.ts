@@ -11,7 +11,7 @@ export class SpotBridge {
   private state=empty();
   getState(){return structuredClone(this.state);}
   invalidate(now:number){for(const a of this.state.accounts)this.state.statuses[a.id]={state:'failed',attemptedAt:new Date(now).toISOString(),reason:'辅助程序读取或导入失败；旧数量仅历史参考'};}
-  import(text:string,now:number){
+  importSnapshot(text:string,now:number){
     try{
       if(text.length>1_000_000)throw new Error();
       const x=fields(JSON.parse(text),['format','version','mode','uid','status','startedAt','endedAt','balances']);
