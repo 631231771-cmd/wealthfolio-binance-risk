@@ -56,23 +56,31 @@ export function nonnegative(value: string): Decimal {
   if (!result.isFinite() || result.isNegative()) throw new Error('数量或价格无效');
   return result;
 }
+export const SNAPSHOT_REASONS=['SNAPSHOT_BATCH_INVALID','SNAPSHOT_TIME_INVALID','SNAPSHOT_SOURCE_INVALID','SNAPSHOT_COLLECTION_INVALID','ASSET_IDENTITY_INVALID','DUPLICATE_ASSET','FIXTURE_IDENTITY_FORBIDDEN','DECIMAL_INVALID','PRICE_METADATA_INVALID'] as const;
+export class SnapshotValidationError extends Error {
+  constructor(readonly reason:typeof SNAPSHOT_REASONS[number],readonly path:string){super({SNAPSHOT_BATCH_INVALID:'快照身份或时间无效',SNAPSHOT_TIME_INVALID:'快照身份或时间无效',SNAPSHOT_SOURCE_INVALID:'数据来源无效',SNAPSHOT_COLLECTION_INVALID:'外部余额必须提供真实采集起止时间',ASSET_IDENTITY_INVALID:'资产身份缺失或重复',DUPLICATE_ASSET:'资产身份缺失或重复',FIXTURE_IDENTITY_FORBIDDEN:'外部资产不得沿用模拟身份或报价',DECIMAL_INVALID:'数量或价格格式无效',PRICE_METADATA_INVALID:'价格币种或时间不匹配'}[reason]);}
+}
 export function validateSnapshot(snapshot: Snapshot): void {
-  if (!snapshot.batchId || !Number.isFinite(Date.parse(snapshot.asOf))) throw new Error('快照身份或时间无效');
-  if (!['fixture','external'].includes(snapshot.dataMode)) throw new Error('数据来源无效');
+  if (!snapshot.batchId) throw new SnapshotValidationError('SNAPSHOT_BATCH_INVALID','snapshot.batchId');
+  if (!Number.isFinite(Date.parse(snapshot.asOf))) throw new SnapshotValidationError('SNAPSHOT_TIME_INVALID','snapshot.asOf');
+  if (!['fixture','external'].includes(snapshot.dataMode)) throw new SnapshotValidationError('SNAPSHOT_SOURCE_INVALID','snapshot.dataMode');
   if (snapshot.dataMode === 'external') {
     const start=Date.parse(snapshot.collectionStartedAt ?? ''), end=Date.parse(snapshot.collectionEndedAt ?? '');
-    if (!Number.isFinite(start) || !Number.isFinite(end) || start>end || end!==Date.parse(snapshot.asOf)) throw new Error('外部余额必须提供真实采集起止时间');
+    if (!Number.isFinite(start)) throw new SnapshotValidationError('SNAPSHOT_COLLECTION_INVALID','snapshot.collectionStartedAt');
+    if (!Number.isFinite(end) || start>end || end!==Date.parse(snapshot.asOf)) throw new SnapshotValidationError('SNAPSHOT_COLLECTION_INVALID','snapshot.collectionEndedAt');
   }
   const keys = new Set<string>();
-  for (const p of snapshot.positions) {
+  for (const [index,p] of snapshot.positions.entries()) {
+    const path=`snapshot.positions[${index}]`;
     const key = assetKey(p.asset);
-    if (!p.asset.venue || !p.asset.code || !p.asset.quoteCurrency || keys.has(key)) throw new Error('资产身份缺失或重复');
+    if (!p.asset.venue || !p.asset.code || !p.asset.quoteCurrency) throw new SnapshotValidationError('ASSET_IDENTITY_INVALID',path+'.asset');
+    if(keys.has(key))throw new SnapshotValidationError('DUPLICATE_ASSET',path+'.asset');
     keys.add(key);
-    if (snapshot.dataMode === 'external' && (p.asset.code.startsWith('WRISKDEMO') || p.price && /fixture|固定|模拟/i.test(p.price.source))) throw new Error('外部资产不得沿用模拟身份或报价');
-    nonnegative(p.quantity);
+    if (snapshot.dataMode === 'external' && (p.asset.code.startsWith('WRISKDEMO') || p.price && /fixture|固定|模拟/i.test(p.price.source))) throw new SnapshotValidationError('FIXTURE_IDENTITY_FORBIDDEN',path+'.asset');
+    try{nonnegative(p.quantity);}catch{throw new SnapshotValidationError('DECIMAL_INVALID',path+'.quantity');}
     if (p.price) {
-      nonnegative(p.price.value);
-      if (p.price.currency !== p.asset.quoteCurrency || !Number.isFinite(Date.parse(p.price.asOf))) throw new Error('价格币种或时间不匹配');
+      try{nonnegative(p.price.value);}catch{throw new SnapshotValidationError('DECIMAL_INVALID',path+'.price.value');}
+      if (p.price.currency !== p.asset.quoteCurrency || !Number.isFinite(Date.parse(p.price.asOf))) throw new SnapshotValidationError('PRICE_METADATA_INVALID',path+'.price');
     }
   }
 }

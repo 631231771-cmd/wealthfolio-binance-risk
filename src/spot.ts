@@ -2,7 +2,7 @@ import type { NetworkRequest } from '@wealthfolio/addon-sdk';
 import { buildOfflineReadRequest } from './binance';
 import { DummyCredentials, DUMMY, requestAuthenticated } from './credentials';
 import { parseUsdtMarkets, publicTickerRequest, parseTickerPrices } from './spot-quotes';
-import { applyBatch, assetKey, calculateRisk, DEFAULT_FRESHNESS, nonnegative, validateSnapshot, type Account, type PortfolioState, type Snapshot } from './domain';
+import { applyBatch, assetKey, calculateRisk, DEFAULT_FRESHNESS, nonnegative, validateSnapshot, SnapshotValidationError, SNAPSHOT_REASONS, type Account, type PortfolioState, type Snapshot } from './domain';
 
 // 只读意图白名单。没有可注入的路径、主机、方法或交易参数。
 export const SPOT_PATHS = { time: '/api/v3/time', account: '/api/v3/account', price: '/api/v3/ticker/price', exchangeInfo:'/api/v3/exchangeInfo' } as const;
@@ -35,12 +35,23 @@ export function classifyResponse(response: MockResponse): void {
   if (code===-1121) throw new SpotError('invalid');
   if (response.status!==200 || typeof code==='number' && code<0) throw new SpotError('invalid');
 }
-export function calibrateTime(data: unknown, started: number, ended: number): number {
+export type ClockReason='SERVER_TIME_INVALID'|'LOCAL_CLOCK_CHANGED'|'CLOCK_SAMPLE_SLOW'|'CLOCK_OFFSET_EXCESSIVE';
+export interface ClockDetails {reason:ClockReason;serverTimeValid:boolean;elapsedMs?:number;offsetMs?:number}
+export class ClockError extends SpotError {
+  constructor(readonly details:ClockDetails){super('clock');}
+}
+export function calibrateTime(data: unknown, started: number, ended: number, monotonicElapsed=ended-started): number {
   const time=(data as {serverTime?:unknown})?.serverTime;
-  if (!Number.isSafeInteger(time) || (time as number)<=0 || !Number.isSafeInteger(started) || !Number.isSafeInteger(ended) || ended<started || ended-started>2000) throw new SpotError('clock');
+  const serverTimeValid=Number.isSafeInteger(time)&&(time as number)>0;
+  const elapsedMs=Number.isFinite(monotonicElapsed)&&monotonicElapsed>=0?Math.round(monotonicElapsed*1000)/1000:undefined;
+  const fail=(reason:ClockReason,offsetMs?:number):never=>{throw new ClockError({reason,serverTimeValid,...(elapsedMs===undefined?{}:{elapsedMs}),...(offsetMs===undefined?{}:{offsetMs})});};
+  if(!serverTimeValid)fail('SERVER_TIME_INVALID');
+  // Unix时间只用于签名偏移；单调耗时用于样本质量，并以250ms容差检测墙钟跳变。
+  if(!Number.isSafeInteger(started)||!Number.isSafeInteger(ended)||ended<started||elapsedMs===undefined||Math.abs((ended-started)-monotonicElapsed)>250)fail('LOCAL_CLOCK_CHANGED');
+  if(monotonicElapsed>2000||ended-started>2000)fail('CLOCK_SAMPLE_SLOW');
   const offset=(time as number)-Math.floor((started+ended)/2);
   // 保守限制；不是对交易所时钟真实性的证明。
-  if (Math.abs(offset)>60_000) throw new SpotError('clock');
+  if (Math.abs(offset)>60_000)fail('CLOCK_OFFSET_EXCESSIVE',offset);
   return offset;
 }
 export function publicSpotRequest(kind: 'time'|'price'|'exchangeInfo', symbol?: string): NetworkRequest {
@@ -48,26 +59,58 @@ export function publicSpotRequest(kind: 'time'|'price'|'exchangeInfo', symbol?: 
   return {method:'GET',url:`https://api.binance.com${SPOT_PATHS[kind]}${kind==='price'?'?symbol='+symbol:''}`};
 }
 // 只校验实际使用字段，忽略而不保留上游多余字段；updateTime 是账户更新时间，不冒充余额采集时刻。
+export const SPOT_VALIDATION_REASONS=['HTTP_STATUS_INVALID','HTTP_REJECTED','RESPONSE_BODY_NOT_TEXT','RESPONSE_TOO_LARGE','JSON_INVALID','OBJECT_REQUIRED','FIELD_MISSING','UID_NOT_SAFE_POSITIVE_INTEGER','ACCOUNT_TYPE_NOT_SPOT','ARRAY_REQUIRED','COLLECTION_LIMIT','ASSET_ID_INVALID','FIXTURE_IDENTITY_FORBIDDEN','DUPLICATE_ASSET','DECIMAL_STRING_REQUIRED','DECIMAL_LENGTH_LIMIT','DECIMAL_INVALID','SNAPSHOT_BUILD_FAILED',...SNAPSHOT_REASONS] as const;
+export interface SpotValidationDetails {layer:'response'|'json'|'account'|'balance'|'snapshot';path:string;reason:typeof SPOT_VALIDATION_REASONS[number]}
+export class SpotValidationError extends SpotError {
+  constructor(readonly validation:SpotValidationDetails){super('invalid');}
+}
+export function isSafeValidationPath(path:unknown):path is string {
+  return typeof path==='string'&&/^(?:\$(?:response)?|uid|accountType|balances(?:\[\d{1,4}\](?:\.(?:asset|free|locked))?)?|snapshot(?:\.(?:batchId|asOf|dataMode|collection(?:StartedAt|EndedAt)?|positions(?:\[\d{1,4}\]\.(?:asset|quantity|price(?:\.value)?))?))?)$/.test(path);
+}
 export function validateSpotAccount(data: unknown) {
+  const fail=(reason:SpotValidationDetails['reason'],path:string,layer:SpotValidationDetails['layer']='account'):never=>{throw new SpotValidationError({layer,path,reason});};
   const body=data as {uid?:unknown;accountType?:unknown;balances?:unknown;updateTime?:unknown};
-  if (!body || body.accountType!=='SPOT' || !Number.isSafeInteger(body.uid) || (body.uid as number)<=0 || !Array.isArray(body.balances) || body.balances.length>10_000) throw new SpotError('invalid');
+  if(!body||typeof body!=='object'||Array.isArray(body))fail('OBJECT_REQUIRED','$');
+  if(body.uid===undefined)fail('FIELD_MISSING','uid');
+  if(!Number.isSafeInteger(body.uid)||(body.uid as number)<=0)fail('UID_NOT_SAFE_POSITIVE_INTEGER','uid');
+  if(body.accountType===undefined)fail('FIELD_MISSING','accountType');
+  if(body.accountType!=='SPOT')fail('ACCOUNT_TYPE_NOT_SPOT','accountType');
+  if(body.balances===undefined)fail('FIELD_MISSING','balances');
+  if(!Array.isArray(body.balances))fail('ARRAY_REQUIRED','balances');
+  const rawBalances=body.balances as unknown[];
+  if(rawBalances.length>10_000)fail('COLLECTION_LIMIT','balances');
   const seen=new Set<string>();
-  const balances=body.balances.map(row=> {
-    if (!row || typeof row.asset!=='string' || !/^[A-Z0-9]{1,40}$/.test(row.asset) || row.asset.startsWith('WRISKDEMO') || seen.has(row.asset)) throw new SpotError('invalid');
-    seen.add(row.asset);
-    if (typeof row.free!=='string' || typeof row.locked!=='string' || row.free.length>80 || row.locked.length>80) throw new SpotError('invalid');
-    try {return {asset:row.asset,free:nonnegative(row.free).toFixed(),locked:nonnegative(row.locked).toFixed()};} catch {throw new SpotError('invalid');}
+  const balances=rawBalances.map((value,index)=> {
+    const path=`balances[${index}]`;
+    if(!value||typeof value!=='object'||Array.isArray(value))fail('OBJECT_REQUIRED',path,'balance');
+    const row=value as Record<string,unknown>;
+    if(row.asset===undefined)fail('FIELD_MISSING',path+'.asset','balance');
+    // 官方允许UTF8资产名；仅施加资源/不可见字符边界，不规范化、不改大小写或前缀。
+    if(typeof row.asset!=='string'||!row.asset.length||row.asset.length>256||[...row.asset].length>128||new TextEncoder().encode(row.asset).byteLength>256||/[\p{Cc}\p{Cf}\p{Cs}\p{Z}]/u.test(row.asset))fail('ASSET_ID_INVALID',path+'.asset','balance');
+    const asset=row.asset as string;
+    if(asset.startsWith('WRISKDEMO'))fail('FIXTURE_IDENTITY_FORBIDDEN',path+'.asset','balance');
+    if(seen.has(asset))fail('DUPLICATE_ASSET',path+'.asset','balance');
+    seen.add(asset);
+    const decimal=(field:'free'|'locked')=>{
+      const value=row[field],fieldPath=path+'.'+field;
+      if(value===undefined)fail('FIELD_MISSING',fieldPath,'balance');
+      if(typeof value!=='string')fail('DECIMAL_STRING_REQUIRED',fieldPath,'balance');
+      if((value as string).length>80)fail('DECIMAL_LENGTH_LIMIT',fieldPath,'balance');
+      try{return nonnegative(value as string).toFixed();}catch{ return fail('DECIMAL_INVALID',fieldPath,'balance'); }
+    };
+    return {asset,free:decimal('free'),locked:decimal('locked')};
   });
   return {uid:String(body.uid),balances};
 }
 export function spotSnapshot(data: unknown, mode: 'fixture'|'external', startedAt: string, endedAt: string): {account: Account; snapshot: Snapshot} {
-  if (mode!=='fixture' && mode!=='external') throw new SpotError('invalid');
-  if (!Number.isFinite(Date.parse(startedAt)) || !Number.isFinite(Date.parse(endedAt)) || Date.parse(startedAt)>Date.parse(endedAt)) throw new SpotError('invalid');
+  if (mode!=='fixture' && mode!=='external') throw new SpotValidationError({layer:'snapshot',path:'snapshot.dataMode',reason:'SNAPSHOT_SOURCE_INVALID'});
+  if (!Number.isFinite(Date.parse(startedAt))) throw new SpotValidationError({layer:'snapshot',path:'snapshot.collectionStartedAt',reason:'SNAPSHOT_COLLECTION_INVALID'});
+  if (!Number.isFinite(Date.parse(endedAt)) || Date.parse(startedAt)>Date.parse(endedAt)) throw new SpotValidationError({layer:'snapshot',path:'snapshot.collectionEndedAt',reason:'SNAPSHOT_COLLECTION_INVALID'});
   const body=validateSpotAccount(data), owner=mode==='fixture'?`fixture:${body.uid}`:body.uid;
   const account:Account={id:`${mode}:binance:${body.uid}:spot`,platform:'binance',sourceAccountId:owner,name:mode==='fixture'?'Binance 单账号（离线模拟 Spot）':'Binance Spot',kind:'spot',currency:'USDT'};
   const snapshot:Snapshot={accountId:account.id,batchId:`${mode}:spot:${endedAt}`,asOf:endedAt,collectionStartedAt:startedAt,collectionEndedAt:endedAt,dataMode:mode,
     positions:body.balances.map(row=>({asset:{venue:'BINANCE',code:row.asset,type:mode==='fixture' && ['BTC','ETH','BNB','SOL','USDT'].includes(row.asset)?'crypto' as const:'unknown' as const,quoteCurrency:'USDT'},quantity:nonnegative(row.free).add(row.locked).toFixed(),balanceComponents:{free:row.free,locked:row.locked}})).filter(p=>p.quantity!=='0')};
-  validateSnapshot(snapshot); return {account,snapshot};
+  try{validateSnapshot(snapshot);}catch(e){throw new SpotValidationError(e instanceof SnapshotValidationError?{layer:'snapshot',path:e.path,reason:e.reason}:{layer:'snapshot',path:'snapshot',reason:'SNAPSHOT_BUILD_FAILED'});} return {account,snapshot};
 }
 export const spotShock=(assetCode:string):string=>assetCode==='USDT'?'0':'-0.2';
 export function spotRisk(state: PortfolioState, now: number, base='USDT') {

@@ -15,12 +15,13 @@ async function harness(timeout=100){
  const network:Pick<NetworkAPI,'request'>={request:async(req):Promise<NetworkResponse>=>{
   const u=new URL(req.url);calls.push(u.pathname);
   assert.equal(req.method,'GET');assert.ok(['data-api.binance.vision','api.binance.com'].includes(u.hostname));
-  if(u.hostname==='api.binance.com'){assert.ok(['/api/v3/account','/sapi/v1/account/apiRestrictions'].includes(u.pathname));const raw=u.searchParams.get('timestamp')!;assert.equal(u.searchParams.get('signature'),signPayload(`timestamp=${raw}&recvWindow=5000`,'TEST_SECRET_NOT_REAL'));assert.equal(req.headers?.['X-MBX-APIKEY'],'TEST_KEY_NOT_REAL');}
+  const privateRequest=u.hostname==='api.binance.com'&&u.pathname!=='/api/v3/time';
+  if(privateRequest){assert.ok(['/api/v3/account','/sapi/v1/account/apiRestrictions'].includes(u.pathname));const raw=u.searchParams.get('timestamp')!;assert.equal(u.searchParams.get('signature'),signPayload(`timestamp=${raw}&recvWindow=5000`,'TEST_SECRET_NOT_REAL'));assert.equal(req.headers?.['X-MBX-APIKEY'],'TEST_KEY_NOT_REAL');}
   else assert.equal(req.headers,undefined);
   if(u.pathname===blockedPath)await new Promise<void>(r=>{release=r;});
-  if(privateResponse&&u.hostname==='api.binance.com')return privateResponse;
-  if(mode==='network'&&u.hostname==='api.binance.com')throw new Error('TEST_SECRET_NOT_REAL signature=RAW URL '+req.url);
-  if(mode==='limit'&&u.hostname==='api.binance.com')return {status:429,headers:{'Retry-After':'3600'},body:'<html>WAF</html>'};
+  if(privateResponse&&privateRequest)return privateResponse;
+  if(mode==='network'&&privateRequest)throw new Error('TEST_SECRET_NOT_REAL signature=RAW URL '+req.url);
+  if(mode==='limit'&&privateRequest)return {status:429,headers:{'Retry-After':'3600'},body:'<html>WAF</html>'};
   let body:unknown;
   if(u.pathname.endsWith('/time'))body={serverTime:now};
   else if(u.pathname.endsWith('/apiRestrictions'))body=mode==='trade'?{...permissions,enableSpotAndMarginTrading:true}:mode==='no-ip'?{...permissions,ipRestrict:false}:permissions;
@@ -46,7 +47,7 @@ test('HTTP400先解析数字业务码，诊断不含msg、URL或认证信息',as
 test('修正普通认证失败后重新确认可重试，不继承旧10分钟退避',async()=>{
  const h=await harness();h.reader.authorize('1',ack);h.setResponse({status:400,headers:{},body:'{"code":-1022}'});await h.reader.sync();
  h.reader.disconnect();await h.credentials.save('TEST_KEY_NOT_REAL','TEST_SECRET_NOT_REAL');h.reader.authorize('1',ack);h.setResponse(undefined);
- await h.reader.sync();assert.equal(h.reader.getStatus().success,true);assert.equal(h.reader.valued().report.coveredSubtotal,'65.00000000');
+ await h.reader.sync();assert.equal(h.reader.getStatus().success,true);await h.reader.refreshQuotes();assert.equal(h.reader.valued().report.coveredSubtotal,'65.00000000');
 });
 test('只读拒绝明确区分缺字段、读取关闭和额外权限，IP布尔字段仍必须完整',()=>{
  for(const [value,code] of [[{...permissions,enableReading:false},'READING_DISABLED'],[{...permissions,ipRestrict:undefined},'PERMISSION_FIELDS_INCOMPLETE'],[{...permissions,enableWithdrawals:true},'EXTRA_PERMISSION'],[{...permissions,enableWithdrawals:undefined},'PERMISSION_FIELDS_INCOMPLETE']] as const){
@@ -109,11 +110,11 @@ test('直接请求只读权限白名单、固定签名构造',()=>{
 test('本人选择小额纯只读无强制IP：false可读，字段缺失/额外权限仍拒绝',async()=>{
  assert.doesNotThrow(()=>assertReadOnly({...permissions,ipRestrict:false}));
  for(const value of [{...permissions,ipRestrict:undefined},{...permissions,ipRestrict:false,enableReading:false},{...permissions,ipRestrict:false,enableWithdrawals:true},{...permissions,ipRestrict:false,enableNewTrading:true}])assert.throws(()=>assertReadOnly(value));
- const h=await harness();h.reader.authorize('1',ack);h.setMode('no-ip');await h.reader.sync();assert.equal(h.reader.getStatus().success,true);assert.equal(h.reader.valued().report.coveredSubtotal,'65.00000000');
+ const h=await harness();h.reader.authorize('1',ack);h.setMode('no-ip');await h.reader.sync();assert.equal(h.reader.getStatus().success,true);assert.equal(h.reader.valued().report.coveredSubtotal,'15.00000000');await h.reader.refreshQuotes();assert.equal(h.reader.valued().report.coveredSubtotal,'65.00000000');
 });
 test('必须本人确认；权限先于余额；真实来源、缺价与重复不累加',async()=>{
  const h=await harness();await assert.rejects(h.reader.sync());assert.equal(h.calls.length,0);
- assert.throws(()=>h.reader.authorize('1',{...ack,risk:false}));h.reader.authorize('1',ack);await h.reader.sync();
+ assert.throws(()=>h.reader.authorize('1',{...ack,risk:false}));h.reader.authorize('1',ack);await h.reader.sync();await h.reader.refreshQuotes();
  assert.ok(h.calls.indexOf('/sapi/v1/account/apiRestrictions')<h.calls.indexOf('/api/v3/account'));
  for(let i=0;i<2;i++){await h.reader.sync();const v=h.reader.valued();assert.equal(v.report.coveredSubtotal,'65.00000000');assert.equal(v.report.stressLoss,'10.00000000');assert.equal(v.report.total,null);assert.equal(v.report.unpricedPositionCount,1);assert.equal(Object.values(v.state.snapshots)[0].dataMode,'external');assert.equal(Object.values(v.state.snapshots)[0].positions.length,3);}
 });
@@ -138,5 +139,5 @@ test('SDK超时后底层未结束不重叠，断开后迟到结果不发布',asy
  const h=await harness(5);h.reader.authorize('1',ack);h.block('/api/v3/account');await h.reader.sync();assert.equal(h.reader.getDiagnostic().code,'SPOT_TIMEOUT');assert.equal(h.reader.getDiagnostic().stage,'balance');assert.equal(h.reader.getStatus().busy,true);await assert.rejects(h.reader.sync());h.reader.disconnect();h.release();await new Promise(r=>setTimeout(r,1));assert.equal(h.reader.getStatus().busy,false);assert.equal(h.reader.getState().accounts.length,0);assert.equal(h.reader.getDiagnostic().code,'USER_DISCONNECTED');
 });
 test('页面暂停时在途结果丢弃，不能发后续认证或发布余额',async()=>{
- const h=await harness();h.reader.authorize('1',ack);h.block('/sapi/v1/account/apiRestrictions');const task=h.reader.sync();while(h.calls.length<2)await new Promise(r=>setTimeout(r,1));h.reader.setVisible(false);h.release();await task;assert.ok(!h.calls.includes('/api/v3/account'));assert.equal(h.reader.getState().accounts.length,0);
+ const h=await harness();h.reader.authorize('1',ack);h.block('/sapi/v1/account/apiRestrictions');const task=h.reader.sync();while(!h.calls.includes('/sapi/v1/account/apiRestrictions'))await new Promise(r=>setTimeout(r,1));h.reader.setVisible(false);h.release();await task;assert.ok(!h.calls.includes('/api/v3/account'));assert.equal(h.reader.getState().accounts.length,0);
 });

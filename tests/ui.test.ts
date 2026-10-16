@@ -4,15 +4,15 @@ import {createElement} from 'react';
 import {createRequire} from 'node:module';
 const {renderToStaticMarkup}=createRequire(import.meta.url)('react-dom/server') as {renderToStaticMarkup:(element:ReturnType<typeof createElement>)=>string};
 import {DirectSpotPanel,describeDiagnostic,describeRetry,formatPrice} from '../src/direct-panel';
-import type {DirectSpot} from '../src/direct-spot';
+import type {DirectSpot,DirectDiagnostic} from '../src/direct-spot';
 import type {BinanceCredentials} from '../src/credentials';
 import {spotSnapshot,spotShock} from '../src/spot';
 import {assetKey,calculateRisk,type PortfolioState} from '../src/domain';
 const at='2026-10-15T00:00:00.000Z';
-function render(state:PortfolioState,connected:boolean,success=connected,busy=false){
+function render(state:PortfolioState,connected:boolean,success=connected,busy=false,diagnostic?:DirectDiagnostic){
  const shocks=Object.fromEntries(Object.values(state.snapshots).flatMap(s=>s.positions.map(p=>[assetKey(p.asset),spotShock(p.asset.code)])));
  const report=calculateRisk(state,'USDT',[],shocks,{now:at,balanceMaxAgeMs:360000,priceMaxAgeMs:360000,fxMaxAgeMs:360000});
- const reader={valued:()=>({state,report}),getStatus:()=>({connected,busy,auto:false,success,nextDue:0,visible:true,retry:{canRetry:connected&&!busy,reason:busy?'in-flight':connected?'ready':'confirmation-required',waitSeconds:0}}),getDiagnostic:()=>({stage:connected?'complete':'idle',code:connected?'OK':'NOT_CONNECTED'})} as unknown as DirectSpot;
+ const reader={valued:()=>({state,report}),getTimeObservations:()=>[],getPublicObservations:()=>[],getStatus:()=>({connected,busy,auto:false,success,nextDue:0,visible:true,retry:{canRetry:connected&&!busy,reason:busy?'in-flight':connected?'ready':'confirmation-required',waitSeconds:0}}),getDiagnostic:()=>diagnostic??({stage:connected?'complete':'idle',code:connected?'OK':'NOT_CONNECTED'})} as unknown as DirectSpot;
  return renderToStaticMarkup(createElement(DirectSpotPanel,{reader,credentials:{} as BinanceCredentials}));
 }
 function sample(){const {account,snapshot}=spotSnapshot({uid:1,accountType:'SPOT',balances:[{asset:'BTC',free:'0.001',locked:'0'},{asset:'USDT',free:'15',locked:'0'},{asset:'NOPAIR',free:'2',locked:'0'}]},'external',at,at);for(const p of snapshot.positions)if(p.asset.code!=='NOPAIR')p.price={value:p.asset.code==='BTC'?'50000':'1',currency:'USDT',asOf:at,source:'external:test'};return {schemaVersion:1 as const,accounts:[account],snapshots:{[account.id]:snapshot},statuses:{[account.id]:{state:'ready' as const,attemptedAt:at}}};}
@@ -56,4 +56,9 @@ test('错误阶段与安全码明确区分，未知码不透传任意文本',()=
  const cases=[['permissions','READ_ONLY_REJECTED','只读权限'],['identity','UID_MISMATCH','UID'],['balance','SPOT_TIMEOUT','超时'],['disconnected','USER_DISCONNECTED','断开']] as const;
  for(const [stage,code,text] of cases){const value=describeDiagnostic({stage,code});assert.equal(value.code,code);assert.ok(value.text.includes(text));}
  const unknown=describeDiagnostic({stage:'balance',code:'https://bad/?signature=SECRET'});assert.equal(unknown.code,'UNKNOWN');assert.ok(!JSON.stringify(unknown).includes('SECRET'));
+});
+
+test('余额拒绝的主提示直接呈现HTTP/JSON/字段路径/固定原因，不只显示SPOT_INVALID',()=>{
+ const html=render({schemaVersion:1,accounts:[],snapshots:{},statuses:{}},false,false,false,{stage:'balance',code:'SPOT_INVALID',httpStatus:200,jsonValid:true,layer:'account-validation',elapsedMs:100,validation:{layer:'balance',path:'balances[2].locked',reason:'DECIMAL_INVALID'}});
+ const notice=html.split('class="monitor-toolbar"')[0];for(const text of ['HTTP 200','JSON有效','账户字段校验','balances[2].locked','DECIMAL_INVALID'])assert.ok(notice.includes(text));
 });

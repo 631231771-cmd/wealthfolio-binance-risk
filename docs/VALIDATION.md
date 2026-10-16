@@ -1,5 +1,40 @@
 # 验证记录
 
+## v0.1.14 首次连接集中修复（2026-10-16）
+
+- 开发开始时以HEAD621812a及此前0.1.12/0.1.13工作为基线，没有重置或覆盖旧包。修改前相关文件另存artifacts/before-connection-20261016。本人随后再次确认接受本机签名URL日志剩余风险、允许必要修改；本轮未修改宿主/代理/TLS/AI/Windows安全设置。
+- 独立对照参考插件82a56aa、Binance官方Spot/权限文档及Wealthfolio3.10.0官方源码f964320。签名/header/GET/body文本契约无已证实错误；保留HMAC，新增Node crypto交叉核验。SDK日志路径仍存在，插件脱敏不能修复宿主提前记录；未知HOST_REQUEST_FAILED不能据此归因为TLS/DNS/代理。
+- 修改前3项新虚构连接测试失败。证实校时已有合格样本仍会被下一次宿主拒绝推翻；独立验证旧ASCII限制违背官方UTF-8说明、当前0.1.13改动已保留修复，不能把它断言为实际SPOT_INVALID根因。
+- 修复校时为Spot同主机最多3次、首个合格即继续；仅重试慢样本/已完成宿主失败/HTTP5xx网络错误。2秒/60秒/250ms/recvWindow5000不放宽。首次链路只执行time、权限、余额、UID核对并立即发布数量；行情改独立按钮，5分钟自动仅余额。公开在途与余额共享互斥门，晚到限流不丢、隐藏/断开不继续请求。
+- **完整npm run verify实际通过：148项TS测试、类型检查、构建、ZIP、编译入口smoke、13项既有原生自检和原生虚构快照交接。** 新增仅4项集中连接/异常用例；凭据保存→重建读回→独立签名→权限/UID/Unicode余额→DirectSpotPanel渲染使用全虚构数据/transport替身。无凭据、无真实账户请求；不是Windows插件认证成功证据。旧30000/5500及37100/6620基准通过。完整输出artifacts/VERIFY-0.1.14.txt。
+- 唯一新包artifacts/wealthfolio-binance-risk-0.1.14.zip，SHA256 **97a9afc680e74d790581923bb0e28af08e4b66e264d4815a459b01a731d9744b**。权限、主机、依赖均未增加；锁文件仅根版本变化。构建记录改为按版本保留，目标宿主正确标注3.10.0，不覆盖原BUILD-RECEIPT.json。
+- 当时状态：软件修复/无凭据验证完成；新包尚未由本人安装与真实查询。
+- 后续用户回报：v0.1.14已成功读取9项真实Spot持仓，数量逐项核对一致。该结论来自本人验收回报，文档未保存UID、资产名称/数量、截图或原始响应。估值、自动刷新及后续刷新稳定性尚未完成。技术依据见CONNECTION-REVIEW-20261016.md；自动化测试不替代实机验收。
+
+## v0.1.13余额阶段SPOT_INVALID定点修复（2026-10-15）
+
+- HEAD621812a，保留此前0.1.12未提交源码/文档，没有重置或提交推送。仅核对spot/direct-spot/domain及相关测试，未重新审计全项目或调用Astra。
+- 核对[官方账户格式](https://developers.binance.com/docs/binance-spot-api-docs/rest-api/account-endpoints)：uid为integer/int64，accountType示例SPOT，balances为对象数组、asset/free/locked均字符串，omitZeroBalances默认false。JS不安全整数UID仍拒绝且给专门原因，不从本人预期UID替代；其他非余额字段不作为Key只读权限证明。
+- [官方通用说明](https://developers.binance.com/docs/binance-spot-api-docs/rest-api/general-api-information)允许响应出现非ASCII UTF-8资产名。先用完全虚构中文标识的0/1.25余额复现旧解析均invalid；又以虚构非法free类型复现后续校验丢HTTP200元数据。初始两条回归先失败，脱敏记录artifacts/REPRO-0.1.13.txt。没有读取真实响应，不能认定该规则就是实际账户失败根因。
+- 修复资产ASCII误限，UTF-8身份原样保留，不改前缀/大小写/规范形；保留资源与控制字符、fixture命名空间保护。合法零记录完整校验后才省略；零记录中的无效字段仍拒绝，不通过丢弃非零资产换取成功。未知资产无可靠报价时保留数量/缺价。
+- 新增精确固定诊断：HTTP状态/正文类型与大小/JSON解析、账户字段、余额行及快照路径和原因；HTTP200/JSON有效/耗时不因后续校验丢失。每次新请求清空元数据，原生余额请求失败不继承权限200。原因/路径/层级输出白名单，不记录真实UID/币名/数量/原始JSON/Key/Secret/签名URL。未分类本地异常标SNAPSHOT_BUILD_FAILED/snapshot，不假装精确定位。
+- **实际完整npm run verify通过144/144项TS、类型、构建、统一ZIP、smoke及既有13项原生自检/交接。** 相比0.1.12增加9项余额测试与1项主提示可读测试，含UTF-8零/非零、未知身份/极小值、官方字段、坏行/重复/负数/字符串长度、200非JSON/大响应/非文本、宿主失败元数据隔离、快照各拒绝原因、恶意诊断字段白名单。原30000/5500和37100/6620保留，计算规则未改。完整检查曾发现旧快照异常文本回归，已保留原固定中文文本后重跑通过。
+- 唯一新包artifacts/wealthfolio-binance-risk-0.1.13.zip，SHA256 **a152fa06e35ff7dce4d54b6aa7ae3fa51c4e7d002469fb59e6e756ba75366436**。主机/权限/依赖不增加，不改主程序、DeepSeek或其他资料库；旧包/备用读取器保留。完整输出artifacts/VERIFY-0.1.13.txt。
+- **2026-10-16本人查询回报，停在公开校时。** MARKET #1为HTTP200/时间字段有效/8223.3ms/CLOCK_SAMPLE_SLOW；#2为HTTP200/字段有效/1980.4ms/偏移2464ms/OK；#3为HOST_REQUEST_FAILED/host-call/5005.6ms、无HTTP状态。当前采样代码遇到后续宿主失败立即停止，即使此前已有合格样本；不把该次解释为所有样本过慢、不把约5秒推断成原生超时或TLS/DNS根因。
+- 该次没有进入权限/余额，故真实余额HTTP200/JSON/具体字段原因仍缺证据，既不能确认ASCII误限是原失败根因，也不能宣称修复已通过账户实测。上述为本人实际摘要回报，非助手观察安装管理器/截屏/拦截原始流量。本轮助手无私人API请求、存量凭据读取或桌面观察。
+- 按本人要求的一次验证后停止条件，记录缺口并停止，不要求重试、重装或保存凭据，不再增加测试或新版本。本次仅更新文档，未改代码/采样策略、重跑verify或重建ZIP；原构建校验记录保持不变。
+
+## v0.1.12校时/网络定点整改（2026-10-15）
+
+- 保留621812a基线及三份本地未提交诊断资料，不重做UI或连接架构。校时新增四固定原因，performance.now测耗时，Date.now测签名Unix时间；墙钟差异>250ms按跳变拒绝。原2秒往返、60秒偏移、recvWindow=5000均保留。三样本串行选合格低耗时；全慢或其他校时异常不发后续私人请求。
+- 原请求包装新增plugin-timer/host-call/http-response及耗时/HTTP/数字码，宿主String不作TLS/DNS/原生超时推断，统一HOST_REQUEST_FAILED；没有保存或输出原始错误/URL/header/正文/cause。旧429/418晚到冷却、断开和单飞回归保留。
+- 新增原诊断区公开time对照；代码路径不调用secrets、权限、余额，每现有主机最多3次串行采样，限定GET/固定路径/无认证信息；传输/HTTP失败停止该主机，429/418/插件超时在途/断开停止全部。页面既有isSaved活动标记查询保持，不把“对照方法无secrets调用”说成整个页面无secrets操作。
+- **实际完整npm run verify通过134/134项TS、类型、build/ZIP/smoke/receipt及既有13项原生自检/交接。** 新增12项定点测试含四校时原因与边界、慢样本后选取、三次全慢、无secrets调用、公开白名单/六次串行、host String拒绝、插件超时、HTTP/非JSON限流、断开隐藏与在途保护。旧30000/5500与37100/6620不回归。只为新行为运行必要检查，不重新审计上游。
+- ZIP artifacts/wealthfolio-binance-risk-0.1.12.zip SHA256 **62e0f079da908212c4e828c4656c2acd36d65a672dbae0811c234c4ff64b62d3**；依赖/权限/允许主机不增加。未发助手认证、不读存量Key/Secret、不改代理/TLS/主程序/DeepSeek。旧产物与本地备用读取器保留。
+- 本人安装请求后自行查询并回报新摘要：MARKET三次HTTP200、字段有效、耗时776.2/743.8/604.3ms、偏移1100/1078/1029ms，全部OK。因此**该次**校时通过；本人另回报balance/SPOT_INVALID，没有提供HTTP/数字码或具体字段拒绝原因，不能宣称余额已接纳或猜测哪项字段异常。上述为本人实际宿主摘要回报，非助手观察或替身结果；未抓取当前敏感桌面。
+- 后续本人找到并点击“公开时间对照（不读凭据）”，回报当前客户端经官方SDK的完整6行：MARKET耗时639.7/688.9/651.2ms、偏移1040/1065/1043ms；SPOT耗时511.7/455/487.5ms、偏移958/948/954ms。六次均HTTP200、时间字段有效、OK，均在原2秒/60秒限制内。原方法固定GET time、无header/body且不调用secrets（自动化已覆盖）；页面原有活动标记检查与此方法区分。本人实际宿主摘要回报，不冒充助手抓取/代理流量审计；脱敏记录artifacts/PUBLIC-TIME-0.1.12.json。
+- 因而双主机该次公开链路/校时实测通过，早前clock/network具体原因无法追溯；当前余额阶段SPOT_INVALID具体拒绝条件仍未查明，不能由公开200推断账户200/UID/余额成功。助手不再次认证、不要求重装或保存凭据；结束本轮定点整改并等待本人决定下一步。
+
 日期：2026-10-13。环境：Windows PowerShell、Node 24.17.0、npm 11.13.0；Wealthfolio SDK/开发工具 3.9.0，对应目标桌面 v3.9.1。
 
 ## 已执行
@@ -26,13 +61,13 @@
 
 ## 工作目录迁移
 
-2026-10-13：完整项目迁至 `F:\Code\风控`。3558 个原有文件的迁移前后 SHA256 全部一致，包含依赖与所有下载产物。应用源码和既有安装包未改动；工作目录说明及下载记录中的当前保存路径更新至新位置。迁移明细见 `artifacts/MIGRATION-RECEIPT.json`，既有包内部文档保留原构建快照。
+2026-10-13：完整项目迁至 `[本机路径已脱敏]`。3558 个原有文件的迁移前后 SHA256 全部一致，包含依赖与所有下载产物。应用源码和既有安装包未改动；工作目录说明及下载记录中的当前保存路径更新至新位置。迁移明细见 `artifacts/MIGRATION-RECEIPT.json`，既有包内部文档保留原构建快照。
 
 迁移后在新目录执行类型检查、24 项测试及编译入口静态渲染，全部通过；客户端安装包和插件 ZIP 的 SHA256 仍与此前记录一致。没有重新开发 PoC、重新打包或执行客户端安装。
 
 ## v0.1.1 Windows 桌面真实验收（2026-10-13，历史记录）
 
-以下是本轮后续的实际结果，不是 SDK 替身。Windows 11 x64，官方 Wealthfolio v3.9.1，路径 `E:\Wealthfolio\Wealthfolio.exe`；读回 FileVersion/ProductVersion 均为 3.9.1。原官方下载及校验来源在 `artifacts/Wealthfolio-v3.9.1-download-receipt.json`。
+以下是本轮后续的实际结果，不是 SDK 替身。Windows 11 x64，官方 Wealthfolio v3.9.1，路径 `[本机路径已脱敏]`；读回 FileVersion/ProductVersion 均为 3.9.1。原官方下载及校验来源在 `artifacts/Wealthfolio-v3.9.1-download-receipt.json`。
 
 通过官方个人资料流程新建 **WRISK Windows 验收 20261013**，USD；先确认空资料 0 个账户/0 条持仓。只向此资料写入模拟数据，没有修改、删除或覆盖原 Personal 资料数据库，没有购买、订阅或启用 Connect。全部桌面操作经原生 UI，没有修改主程序或通过私有接口操作数据库。
 
@@ -44,7 +79,7 @@ v0.1.1 仅修正 host.ts：使用返回 ID，以 providerAccountId + 所有权�
 
 修复后 `npm run verify` 全部通过（类型、25 测试、构建、ZIP、静态入口）；继续验收时再次 typecheck/test/smoke 通过。后续仅更新文档，不再打包，保留实际安装 ZIP：
 
-`F:\Code\风控\artifacts\wealthfolio-binance-risk-0.1.1.zip`
+`[本机路径已脱敏]`
 
 SHA256：`2afb88b0080d6e423b3a894cbe51bc1191a4c12dc54600c824666e5a99270714`。原 0.1.0 ZIP 和构建记录保留；包内 README 为构建快照。BUILD-RECEIPT 中 desktopInstallation=未完成是打包当时状态，实际结果以本文及 WINDOWS-ACCEPTANCE-RECEIPT 为准。
 
@@ -98,7 +133,7 @@ SHA256：`2afb88b0080d6e423b3a894cbe51bc1191a4c12dc54600c824666e5a99270714`。�
 
 静态页面样例是无快照、失败且有历史、部分失败、部分缺价、真实零持仓、正常基准。它不是桌面证据。锁文件仅同步项目版本与脚本，不升级依赖；没有加入框架或服务。
 
-安装包：`F:\Code\风控\artifacts\wealthfolio-binance-risk-0.1.2.zip`。
+安装包：`[本机路径已脱敏]`。
 
 SHA256：`7a957cb3e43098b404b37bc804199f62d72b81a94c1e7b6bf85c88c8afb1c3a1`。原包和 BUILD-RECEIPT-0.1.1.json 保留。包内 README 为构建快照；当前 BUILD-RECEIPT 的 desktopInstallation 是打包时状态，桌面结果见本节及 WINDOWS-ACCEPTANCE-0.1.2.json。
 
@@ -136,7 +171,7 @@ SHA256：`7a957cb3e43098b404b37bc804199f62d72b81a94c1e7b6bf85c88c8afb1c3a1`。�
 
 SDK 替身故障验证不是 Windows 原生凭据库故障注入。模拟网络负对照运行临时 Node HTTP 服务和宿主 invoke / reqwest 风格错误替身，复现插件脱敏发生在宿主记日志之后的问题；没有运行官方 Rust 网络链路，也不是插件 localhost 代理。阻断门不调用 mock broker；完整官方日志安全未通过，参见 SECURITY 源码链路。
 
-安装包：`F:\Code\风控\artifacts\wealthfolio-binance-risk-0.1.3.zip`。
+安装包：`[本机路径已脱敏]`。
 
 SHA256：`801b27e64f2876bbcab33562bf3599b0b689eda32c82cb5bc431155db18703dc`。旧包/构建记录保留。后续验收文档更新没有重打包，包内文档是构建快照。没有依赖升级。
 
@@ -228,7 +263,7 @@ main/v0.1.3 保存基线提交 91f3432；本轮 feature/spot-readonly-offline �
 
 ## v0.1.5 官方 Windows 实机验收与公开行情准备（2026-10-14）
 
-本节更新上一节的桌面待办，保留此前开发记录。宿主 E:\Wealthfolio\Wealthfolio.exe 文件/Product版本均为3.9.1；独立资料库 WRISK Windows 验收 20261013。用户核对并亲自批准安装0.1.5，插件页实际显示0.1.5；权限仅 secrets.set/get/delete 和 files.openSaveDialog。没有网络/use/主程序资产权限。安装包SHA256仍为 **7fba58261c0fe684f21d353afea8314120beeaf3f0548001585731ab2127554b**，源码基线f07cf33，本轮未重打包或改代码。
+本节更新上一节的桌面待办，保留此前开发记录。宿主 [本机路径已脱敏] 文件/Product版本均为3.9.1；独立资料库 WRISK Windows 验收 20261013。用户核对并亲自批准安装0.1.5，插件页实际显示0.1.5；权限仅 secrets.set/get/delete 和 files.openSaveDialog。没有网络/use/主程序资产权限。安装包SHA256仍为 **7fba58261c0fe684f21d353afea8314120beeaf3f0548001585731ab2127554b**，源码基线f07cf33，本轮未重打包或改代码。
 
 | 真正执行的桌面项 | 结果 |
 |---|---|
@@ -250,7 +285,7 @@ main/v0.1.3 保存基线提交 91f3432；本轮 feature/spot-readonly-offline �
 
 ## v0.1.6 真实公开行情（2026-10-14 开发；2026-10-15 完成复验记录）
 
-用户授权唯一公开行情主机，亲自安装0.1.6，并在权限页勾选 data-api.binance.vision；随后实际观察为“已批准”。官方宿主 E:\Wealthfolio\Wealthfolio.exe 文件版本仍3.9.1；独立资料库 WRISK Windows 验收 20261013。未升级弹窗提供的3.10.0，未修改主程序、其他资料库或 DeepSeek。
+用户授权唯一公开行情主机，亲自安装0.1.6，并在权限页勾选 data-api.binance.vision；随后实际观察为“已批准”。官方宿主 [本机路径已脱敏] 文件版本仍3.9.1；独立资料库 WRISK Windows 验收 20261013。未升级弹窗提供的3.10.0，未修改主程序、其他资料库或 DeepSeek。
 
 ### 自动化与产物
 
@@ -330,7 +365,7 @@ main/v0.1.3 保存基线提交 91f3432；本轮 feature/spot-readonly-offline �
 - 已提交推送4bda3e7，CI 38697340415成功；这是首次包的自动化证据，不代表桌面通过。
 - 用户亲自批准后，WRISK Windows验收20261013插件管理器确认为0.1.8；打开页面失败，toast为Unexpected token ':'。旧静态渲染未发现此宿主加载问题，未将安装识别成功记为页面通过。
 - 最小兼容候选仅将快照类的保留字方法名import改为importSnapshot及对应调用；未修改宿主、权限或数据语义。重新执行typecheck、96项测试、build、package、smoke、receipt与现有原生fixture输出→TS导入检查，全部通过。新ZIP SHA256 6964e0499ac47ef789d33bb5897b0140036edb89d950b1a0e3a5dc0f01429eb4；失败包留本地before-desktop-fix副本。当前尚未实机证实修正有效，也未确定宿主具体重写位置，等待用户重新导入。
-- 同期原生GUI独立执行：默认虚构模式、初始无凭据；A保存后提示加密保存核验且密码框清空；关闭后重新启动显示已成功读回且没有自动请求；B替换后同样清空并核验；生成fixture UID900000001、BTC0.001、ETH0.02、USDT free12/locked3、NOPAIR2。没有启动--allow-live，没有真实密钥或认证请求。
+- 同期原生GUI独立执行：默认虚构模式、初始无凭据；A保存后提示加密保存核验且密码框清空；关闭后重新启动显示已成功读回且没有自动请求；B替换后同样清空并核验；生成fixture UID（虚构）、BTC0.001、ETH0.02、USDT free12/locked3、NOPAIR2。没有启动--allow-live，没有真实密钥或认证请求。
 - 原生GUI删除、插件快照交接/公开估值/重复/失效仍未执行。实际宿主为3.10.0；没有改其他资料库或DeepSeek配置。
 
 ## v0.1.8 修正包Windows复验结果（2026-10-15）
@@ -341,7 +376,7 @@ main/v0.1.3 保存基线提交 91f3432；本轮 feature/spot-readonly-offline �
 |---|---|
 | 重新安装并打开插件 | v0.1.8页面成功；只改import方法名为importSnapshot后加载恢复。未定位宿主内部具体重写位置，不以此推断日志漏洞修复 |
 | 原生GUI保存/重启/替换 | A保存核验/两个密码框清空；关闭进程再启动读回存在且无自动请求；B替换核验/清空 |
-| 原生GUI生成、插件手动导入 | fixture UID900000001，BTC0.001、ETH0.02、USDT15（free12/locked3）、NOPAIR2，原始采集时间保留；缺价前仅USDT15可定价，partial/3缺估值，完整总额不可用 |
+| 原生GUI生成、插件手动导入 | fixture UID（虚构），BTC0.001、ETH0.02、USDT15（free12/locked3）、NOPAIR2，原始采集时间保留；缺价前仅USDT15可定价，partial/3缺估值，完整总额不可用 |
 | 同一有效快照重复导入 | 仍四行和USDT15，数量不累加；首次尝试已过60秒的重导入被拒绝，后用新快照完成有效重复验证 |
 | 空导入及过期重导入 | 当前小计/压力不可用，旧数量/历史可定价部分保留；没有显示当前资产0 |
 | 公开行情权限 | 开始权限页显示唯一data-api.binance.vision已拒绝；用户亲自勾选并保存。权限保存后首次请求仍失败，客户端真实关闭重启后成功；未加其他主机/私人请求 |
@@ -393,6 +428,8 @@ main/v0.1.3 保存基线提交 91f3432；本轮 feature/spot-readonly-offline �
 
 ## v0.1.11首次查询显示与本人IP策略决定（2026-10-15）
 
+- 后续本人再次查询回报clock阶段SPOT_CLOCK，无HTTP/数字码，表示刚重导入插件；没有成功余额证据。定点本地函数复现：serverTime为往返中点、真实偏移为0时，200ms/2000ms被接受，2001ms/3000ms均抛clock。当前错误不能区分耗时、格式、系统时钟跳变或偏移限制；不据此断言电脑时钟/代理/凭据有错。没有发送认证、读取凭据或恢复桌面；仅运行该函数的四组离线样例，未重新运行完整verify或生成新包。交接说明docs/SPOT-CONNECTION-HANDOFF.md，不调用Astra。
+- 后续本人回报：Spot余额读取 / SPOT_NETWORK，无HTTP状态，约10秒失败；真实余额及自动刷新仍未通过。本人确认Clash TUN开启。无凭据.NET TCP/TLS诊断：api.binance.com与data-api.binance.vision的系统解析直连、[本机地址已脱敏]:7897 CONNECT四路均tls_ok，约317～499ms；仅发送代理隧道协商/TLS握手，不查询账户、不发送API凭据，不输出地址/证书正文。系统代理/监听存在、DNS含fake-IP段不是根因证明；该诊断不复现宿主reqwest，不能将其记为真实API或宿主网络验收。未调整Clash/代理/证书、未恢复桌面观察。现有10秒宿主请求设置及SDK异常统一归network可能掩盖超时，当前不能据等待时间断定具体底层故障；本轮未改请求或重建包。
 - 起点e4e40b4、工作区干净。本人回报旧版权限阶段HTTP400/-2008，随后回报READ_ONLY_REJECTED/ipRestrict=false；只保存安全码，不获取完整响应、密钥、UID或持仓。后者说明旧插件在IP条件处拦截，不证明余额或账户身份已经验证。
 - 独立离线复现：authorize后、任何network/secrets调用前，connected=true但success=false/快照0/密码框0。新测试先失败，修正为按success隐藏后密码框2/首次查询按钮仍在，网络及secrets读取均为0。保留成功后隐藏；未因排错修改真实凭据。该替身/静态证据不能冒充真实首次查询GUI回归。
 - -2008不再归invalid，改为固定认证错误和“连接资料未通过验证”说明。依据[CCXT币安源代码](https://github.com/ccxt/ccxt/blob/master/ts/src/binance.ts)的AuthenticationError映射，注释undocumented；当前币安官方Spot/Wallet表未列出，不能由此断言Key已失效或断言本机仍存假值。没有复制上游代码。

@@ -1,5 +1,13 @@
 # 架构与边界
 
+## 2026-10-16 当前真实Spot连接路径
+
+v0.1.14保留原风险、凭据、严格余额解析和界面，只局部简化DirectSpot。官方secrets读回后，api.binance.com公开time最多3次，第一个合格样本返回；仍拒绝>2000ms、>60000ms偏移及>250ms墙钟跳变。不再依赖MARKET主机或强制凑齐3样本；只有已结束宿主失败、HTTP 5xx网络错误及慢样本可重试，认证请求不自动重放。
+
+每次余额查询先签名GET apiRestrictions核实纯只读，再签名GET account，严格解析并核对预期UID，立即替换单账户快照。失败保留历史且当前不可用；合法空余额才为零。首次成功后可手动refreshQuotes；它不读secrets、不修改余额成功状态，不沿用失败报价，也不阻塞首次列表。5分钟自动仅更新余额，行情过期仍缺价。DirectSpot通过PublicMarketReader.isBusy统一在途门，隐藏/断开终止后续报价请求；已发SDK请求无法撤回，晚到429/418依然冷却。
+
+当前宿主3.10.0仍存在reqwest错误URL→Tauri invoke日志路径。本轮用户再次接受本机剩余风险，未修改宿主或TLS/代理；插件不能把自身脱敏当作宿主日志已修复。无主账本写入、外部AI调用或真实数据备份。参见[本轮依据与验收](CONNECTION-REVIEW-20261016.md)。以下版本段落是历史边界。
+
 v0.1.5 增量：spot-quotes.ts 解析模拟 exchangeInfo → 明确的资产/USDT 市场映射 → 单币/100 symbols 分批 ticker GET 构造 → 标准 Price。只有 TRADING 且 Spot allowed 的唯一 USDT 市场可用；非 USDT/停牌/歧义/缺价保留缺口，不截后缀猜身份。ticker 无成交时间，Price.asOf 是采集时刻，沿用 120 秒 TTL；USD 转换仍需独立 FX，本版没有。
 
 SpotOfflineReader 继续仅 mock，不持有 ctx.api.network。v0.1.6 单独公开行情模块见文末，不改变离线认证传输。非 USDT -20% / USDT 同币种 0% 是明确测试情景，未知法律类型不伪装普通币或真实 Stocks。SpotHoldingsTable 直接用风险报告的 eligiblePositionKeys 显示当前金额/权重/损失，过期或缺价行仍显示数量和历史报价。旧基准与新会话隔离，备份不扩展。v0.1.5 已完成 Windows 验收，v0.1.4 自身未复验；各版本以 VALIDATION 最新节为准，下文保留历史边界。
@@ -118,6 +126,24 @@ request在受限正文内先解析整数code再分类；DirectRequestError只携
 ReadOnlyError只含固定原因和必要已知字段/布尔状态，缺字段不猜false；所有旧权限策略保留。isSaved仅读取非密钥活动标记，未查询时不读Key/Secret槽。价格展示用Decimal完整有效小数，只有市值/损失格式化两位；资产计算与来源隔离不变。
 
 ## v0.1.11用户决定与显示修正
+
+## v0.1.12校时与请求诊断
+
+## v0.1.13余额解析与安全校验路径
+
+官方GET account的uid为整数、accountType示例SPOT、balances为asset/free/locked数组；保留JS安全正整数UID，不接纳已失精的int64或改用预期UID兜底。free/locked按既有非负十进制字符串规则，缺失/负数/重复/错误类型不发布快照。官方明确响应可能含UTF-8资产名，已移除纯ASCII限制；身份原样保留，不规范化、不合并。资源边界为非空、至多128码点/256UTF-8字节且无控制/格式/分隔/孤立代理字符，非币安官方长度声明。合法零记录完整校验后才从非零持仓省略，未知非零资产保留并缺价，不增加行情源或改变报价计算。
+
+SpotValidationError与SnapshotValidationError只携带固定层级、结构路径和原因。请求包装区分非文本、超限、JSON无效、HTTP失败；超限JSON未解析时不谎报JSON无效。成功HTTP/JSON元数据在后续账户/快照错误中保留；新请求开始清空元数据，宿主拒绝不得继承此前权限请求的200。界面白名单检查原因/路径/层级；SPOT_INVALID主提示与原诊断区同时给安全摘要。未知本地解析异常标SNAPSHOT_BUILD_FAILED/snapshot，明确尚无具体根因，不带原始异常或字段值。
+
+依据：[官方account格式](https://developers.binance.com/docs/binance-spot-api-docs/rest-api/account-endpoints)、[官方UTF-8说明](https://developers.binance.com/docs/binance-spot-api-docs/rest-api/general-api-information)。只查公共文档，未抓取真实响应。
+
+### 以下为v0.1.12诊断记录
+
+DirectSpot原请求包装保留单飞、晚到限流和断开/隐藏保护，新增固定失败层级：plugin-timer、host-call、http-response；不解析宿主String、不保留原始异常/cause。校时本地拒绝使用clock-validation及ClockError四原因，只携带耗时/偏移/时间字段有效性。performance.now与签名Date.now分离，墙钟与单调耗时差超过250ms拒绝；原2秒往返、60秒偏移与recvWindow=5000不放宽。三次串行校时选合格最低耗时，非慢样本错误立即停止。
+
+公开testPublicTime只能在未连接、可见、无在途且无交易所冷却时手动执行；仅两个硬编码主机的GET /api/v3/time，不能传入路径/header/body。完全不读secrets、不授权会话、不采集余额或报价。每主机最多3次，传输/HTTP失败停止该主机，限流/在途超时/断开停止全部。安全观察最多6条只存页面内存，原连接设置诊断区显示；不新增存储或页面。
+
+### 以下为v0.1.11显示与用户决定记录
 
 用户明确接受独立小额纯只读无强制IP白名单：仅删除ipRestrict===true条件，保留此字段必须boolean及其他完整/严格只读检查。未知true权限继续拒绝，不改变端点、HMAC、数据与账本边界；四确认权限说明增加无IP隐私风险。
 

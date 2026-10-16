@@ -30,21 +30,28 @@ export class PublicMarketReader {
   getState(){return structuredClone(this.state);}
   getServerTime(){return this.serverTime;}
   getCooldownUntil(){return this.cooldownUntil;}
+  isBusy(){return this.busy||this.pending;}
   disconnect(){this.epoch++;this.state.statuses[ID]={state:'failed',attemptedAt:new Date(this.now()).toISOString(),reason:messages.disconnected};}
   simulateNetworkFailure(){this.disconnect();this.state.statuses[ID].reason=messages.network;}
   private async request(request:NetworkRequest,epoch:number):Promise<unknown> {
     if(epoch!==this.epoch)throw new PublicMarketError('disconnected');
     let timer:ReturnType<typeof setTimeout>|undefined;
     this.pending=true;
-    const operation=Promise.resolve().then(()=>this.network.request(request)).finally(()=>{this.pending=false;});
+    const operation=Promise.resolve().then(()=>this.network.request(request)).then(response=>{
+      // 限流是传输层事实：超时/隐藏/断开后才收到也必须保留，不能重连绕过。
+      if(response.status===429||response.status===418){
+        const retry=Number(Object.entries(response.headers??{}).find(([key])=>key.toLowerCase()==='retry-after')?.[1]);
+        const seconds=Number.isSafeInteger(retry)&&retry>0?Math.min(retry,Math.floor((Number.MAX_SAFE_INTEGER-this.now())/1000)):(response.status===418?1800:60);
+        this.cooldownUntil=Math.max(this.cooldownUntil,this.now()+seconds*1000);
+      }
+      return response;
+    }).finally(()=>{this.pending=false;});
     let response:NetworkResponse;
     try {response=await Promise.race([operation,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new PublicMarketError('timeout')),this.timeoutMs);})]);}
     catch(e){throw e instanceof PublicMarketError?e:new PublicMarketError('network');}
     finally{clearTimeout(timer);}
     if(epoch!==this.epoch)throw new PublicMarketError('disconnected');
     if(response.status===429 || response.status===418) {
-      const raw=Object.entries(response.headers??{}).find(([key])=>key.toLowerCase()==='retry-after')?.[1], seconds=Number(raw);
-      this.cooldownUntil=this.now()+(Number.isSafeInteger(seconds)&&seconds>0&&seconds<=86400?seconds:60)*1000;
       throw new PublicMarketError('rate-limit');
     }
     if(response.status!==200)throw new PublicMarketError('network');

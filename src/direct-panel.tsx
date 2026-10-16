@@ -1,15 +1,37 @@
 import { useState,useRef,useEffect } from 'react';
-import {READ_ONLY_FIELDS,type DirectSpot,type DirectDiagnostic,type DirectRetry} from './direct-spot';
+import {READ_ONLY_FIELDS,type DirectSpot,type DirectDiagnostic,type DirectRetry,type TimeObservation} from './direct-spot';
 import type { BinanceCredentials } from './credentials';
+import {SPOT_VALIDATION_REASONS,isSafeValidationPath} from './spot';
 import {assetKey,positionKey,nonnegative} from './domain';
 
 const stages:Record<DirectDiagnostic['stage'],string>={idle:'连接准备',credentials:'安全存储',clock:'时间校准',permissions:'只读权限检查',balance:'Spot余额读取',identity:'账户核对',quotes:'公开报价',complete:'同步完成',disconnected:'连接控制'};
 const codes:Record<string,string>={NOT_CONNECTED:'连接币安后显示真实Spot持仓。',RUNNING:'正在处理，请稍候。',OK:'最近一次同步成功。',USER_DISCONNECTED:'你已断开连接，不会再发送新请求。',PAGE_PAUSED:'页面已暂停，返回后按刷新设置继续。',READ_ONLY_REJECTED:'只读权限检查未通过，余额查询已停止。',UID_MISMATCH:'返回账户与预期UID不符，未接纳该账户资产。',QUOTES_UNAVAILABLE:'余额已读取，公开报价暂不可用；缺价资产不计为零。',SPOT_AUTH:'认证未通过，请在连接设置中核对本机凭据和只读权限。',SPOT_FORBIDDEN:'访问受限，连接已停止。',SPOT_SIGNATURE:'签名校验未通过，连接已停止。',SPOT_CLOCK:'时间校准未通过，连接已停止。',SPOT_TIMEOUT:'请求超时，按现有退避规则等待重试。',SPOT_NETWORK:'网络请求失败，历史数量仍保留。',SPOT_RATE_LIMIT:'已被限流，等待冷却后再刷新。',SPOT_INVALID:'响应不完整或格式无效，未作为成功同步。',SPOT_DISCONNECTED:'连接已停止或页面暂停，迟到结果不会发布。',SPOT_BUSY:'已有请求进行中，请稍候。',INVALID_RESPONSE:'未收到有效响应，当前数据不可用。'};
 const permissionText={READING_DISABLED:'未启用读取。',EXTRA_PERMISSION:'检测到额外权限，拒绝继续。',PERMISSION_FIELDS_INCOMPLETE:'权限字段不完整或不是布尔值，无法确认只读。'};
+codes.HOST_REQUEST_FAILED='宿主调用失败；宿主只返回字符串，无法确定TLS、DNS或原生超时。';
+codes.SPOT_TIMEOUT='插件等待计时器超时；宿主在途请求可能尚未结束，暂不重叠重试。';
+const clockText={SERVER_TIME_INVALID:'服务器时间字段无效',LOCAL_CLOCK_CHANGED:'本地时刻倒退/跳变或计时无效',CLOCK_SAMPLE_SLOW:'校时样本过慢',CLOCK_OFFSET_EXCESSIVE:'估计偏移过大'};
+const layerText={'plugin-timer':'插件计时器超时','host-call':'宿主调用失败','http-response':'已收到HTTP响应','clock-validation':'本地校时校验','account-validation':'账户字段校验','snapshot-validation':'快照校验'};
+const validationLayerText={response:'响应状态',json:'JSON解析',account:'账户结构',balance:'余额记录',snapshot:'快照结构'};
+export function describeTimeObservation(row:TimeObservation){
+  const d:DirectDiagnostic={stage:'clock',code:row.code,layer:row.layer,elapsedMs:row.elapsedMs,httpStatus:row.httpStatus,exchangeCode:row.exchangeCode,...(row.reason?{clock:{reason:row.reason,serverTimeValid:row.serverTimeValid===true,elapsedMs:row.elapsedMs,offsetMs:row.offsetMs}}:{})};
+  const detail=describeDiagnostic(d);
+  const host=row.host==='MARKET'?'MARKET':row.host==='SPOT'?'SPOT':'UNKNOWN';
+  const attempt=Number.isInteger(row.attempt)&&row.attempt>=1&&row.attempt<=3?row.attempt:'?';
+  return `${host} #${attempt} · ${detail.code}${detail.metadata?' · '+detail.metadata:''}${!row.reason&&typeof row.serverTimeValid==='boolean'?' · 时间字段'+(row.serverTimeValid?'有效':'无效'):''}${!row.reason&&Number.isFinite(row.offsetMs)?' · 偏移'+row.offsetMs+'ms':''}`;
+}
 export function describeDiagnostic(d:DirectDiagnostic){
   const known=Object.hasOwn(codes,d.code),parts:string[]=[];
   if(Number.isInteger(d.httpStatus)&&d.httpStatus!>=100&&d.httpStatus!<=599)parts.push(`HTTP ${d.httpStatus}`);
   if(Number.isSafeInteger(d.exchangeCode))parts.push(`Binance ${d.exchangeCode}`);
+  if(d.layer&&Object.hasOwn(layerText,d.layer))parts.push(layerText[d.layer]);
+  if(typeof d.elapsedMs==='number'&&Number.isFinite(d.elapsedMs)&&d.elapsedMs>=0)parts.push(`耗时${d.elapsedMs}ms`);
+  if(typeof d.jsonValid==='boolean')parts.push(d.jsonValid?'JSON有效':'JSON无效');
+  if(d.validation&&Object.hasOwn(validationLayerText,d.validation.layer)&&SPOT_VALIDATION_REASONS.includes(d.validation.reason)&&isSafeValidationPath(d.validation.path))parts.push(validationLayerText[d.validation.layer],d.validation.path,d.validation.reason);
+  if(d.clock&&Object.hasOwn(clockText,d.clock.reason)){
+    parts.push(d.clock.reason,clockText[d.clock.reason]);
+    if(typeof d.clock.serverTimeValid==='boolean')parts.push('时间字段'+(d.clock.serverTimeValid?'有效':'无效'));
+    if(typeof d.clock.offsetMs==='number'&&Number.isFinite(d.clock.offsetMs))parts.push(`偏移${d.clock.offsetMs}ms`);
+  }
   if(d.code==='READ_ONLY_REJECTED')for(const item of d.permissionFields??[])if(READ_ONLY_FIELDS.includes(item.field)&&(typeof item.value==='boolean'||item.value===null))parts.push(`${item.field}=${item.value===null?'缺失/非布尔':item.value}`);
   const reason=d.permissionReason&&Object.hasOwn(permissionText,d.permissionReason)?permissionText[d.permissionReason]:undefined;
   return {stage:stages[d.stage]??'连接状态',code:known?d.code:'UNKNOWN',text:known?(d.code==='SPOT_AUTH'&&d.exchangeCode===-2008?'连接资料未通过平台验证，尚未读取持仓。请本人在币安官网核对连接资料；已保存不代表有效。':d.code==='READ_ONLY_REJECTED'&&reason?reason:codes[d.code]):'操作未完成，请在连接设置中核对。',metadata:parts.join(' · ')};
@@ -48,8 +70,9 @@ export function DirectSpotPanel({reader,credentials}:{reader:DirectSpot;credenti
   const work=async(action:()=>Promise<void>)=>{setSaving(true);try{await action();}catch{setMessage('操作未完成，请核对本页确认项、UID或凭据状态。');setSettings(true);}finally{setSaving(false);render(n=>n+1);}};
   return <section className="monitor" aria-label="真实Spot资产监控">
     <header className="monitor-header"><div><p className="eyebrow">BINANCE · SPOT</p><h1>币安资产监控</h1><p className="muted">独立账户 · USDT计价</p></div><span className={'status-badge '+(healthy?'is-good':hasError?'is-error':'is-neutral')}>{label}</span></header>
-    {(!healthy||hasError)&&<div className={'connection-notice '+(hasError?'notice-error':'')} role="status"><div><strong>{hasError?detail.stage+'未完成':status.busy?detail.stage:hasSnapshot?'当前数据不可用':'连接你的币安账户'}</strong><p>{status.busy?'正在同步，请稍候。':detail.text}</p>{hasError&&<code>{detail.stage} · {detail.code}{detail.metadata?' · '+detail.metadata:''}</code>}</div><button onClick={()=>setSettings(true)}>连接设置</button></div>}
-    <div className="monitor-toolbar"><span className="muted">{hasSnapshot?(report.currentAccountIds.length?'真实Spot快照':'保留上次持仓 · 已失效'):'尚无真实余额数据'}</span><div className="button-row"><button disabled={!status.retry.canRetry||saving} onClick={()=>void work(()=>reader.sync())}>{status.busy?'刷新中…':'刷新持仓'}</button><button onClick={()=>setSettings(v=>!v)} aria-expanded={settings}>连接设置</button></div></div>
+    {(!healthy||hasError)&&<div className={'connection-notice '+(hasError?'notice-error':'')} role="status"><div><strong>{hasError?detail.stage+'未完成':status.busy?detail.stage:hasSnapshot?'当前数据不可用':'连接你的币安账户'}</strong><p>{status.busy?'正在同步，请稍候。':detail.text}</p>{hasError&&<code>{detail.stage} · {detail.code}{detail.code==='SPOT_INVALID'&&detail.metadata?' · '+detail.metadata:''}</code>}</div><button onClick={()=>setSettings(true)}>连接设置</button></div>}
+    <div className="monitor-toolbar"><span className="muted">{hasSnapshot?(report.currentAccountIds.length?'真实Spot快照':'保留上次持仓 · 已失效'):'尚无真实余额数据'}</span><div className="button-row"><button disabled={!status.retry.canRetry||saving} onClick={()=>void work(()=>reader.sync())}>{status.busy?'刷新中…':'刷新持仓'}</button><button disabled={!status.success||!report.currentAccountIds.length||!status.retry.canRetry||saving} onClick={()=>void work(()=>reader.refreshQuotes())}>更新公开估值</button><button onClick={()=>setSettings(v=>!v)} aria-expanded={settings}>连接设置</button></div></div>
+    <p className="muted">首次连接只读取Spot币种和数量。公开估值可在连接后单独更新，缺价不会阻止持仓显示。</p>
     <p className="muted retry-status" role="status">{describeRetry(status.retry)}</p>
     <div className="metric-grid">
       <article className="metric-card"><span>Spot 已定价资产</span><strong aria-label={report.coveredSubtotal===null?'不可用':undefined}>{money(report.coveredSubtotal)} <small>USDT</small></strong><p>{report.coverage==='complete'?'Spot估值完整':report.coverage==='partial'?`部分覆盖 · ${report.unpricedPositionCount} 项缺价`:'当前估值不可用'}</p></article>
@@ -68,7 +91,12 @@ export function DirectSpotPanel({reader,credentials}:{reader:DirectSpot;credenti
     <details className="connection-settings" open={settings} onToggle={e=>setSettings(e.currentTarget.open)}><summary>连接设置</summary><div className="settings-content">
       <div className="section-heading"><h2>只读账户连接</h2><button className="button-quiet" onClick={()=>setSettings(false)}>收起</button></div>
       <p className="muted">只连接独立小额账户。凭据仅保存在本机官方secrets；填写时请暂停助手桌面观察，不要把密钥发到聊天。</p>
-      <div className="settings-diagnostic"><strong>{detail.stage}</strong><code>{detail.code}{detail.metadata?' · '+detail.metadata:''}</code><p>{detail.text}</p><p>{describeRetry(status.retry)}</p></div>
+      <div className="settings-diagnostic"><strong>{detail.stage}</strong><code>{detail.code}{detail.metadata?' · '+detail.metadata:''}</code><p>{detail.text}</p><p>{describeRetry(status.retry)}</p>
+      {reader.getTimeObservations().map(row=><p key={'clock-'+row.attempt}>{describeTimeObservation(row)}</p>)}
+      <button disabled={status.connected||status.busy||saving||status.retry.reason==='exchange-limit'} onClick={()=>void work(()=>reader.testPublicTime())}>公开时间对照（不读凭据）</button>
+      <p className="muted">MARKET为公开行情主机，SPOT为币安主机；仅GET公开time，每个主机最多3次串行采样，不查询账户。结果只在本次页面内保留。</p>
+      {reader.getPublicObservations().map(row=><p key={row.host+'-'+row.attempt}>{describeTimeObservation(row)}</p>)}
+      </div>
       {!status.success&&<><div className="credential-grid"><label>预期账户 UID<input ref={uid} autoComplete="off" placeholder="独立测试账户的UID"/></label><label>API Key<input ref={key} type="password" autoComplete="off" placeholder="仅本人在本机填写"/></label><label>Secret<input ref={secret} type="password" autoComplete="off" placeholder="仅本人在本机填写"/></label></div>
       <button disabled={status.busy||saving} onClick={()=>void work(async()=>{reader.disconnect();try{await credentials.save(key.current?.value??'',secret.current?.value??'');setSaved(true);setMessage('凭据已安全保存并核验，未发送认证请求。');}finally{if(key.current)key.current.value='';if(secret.current)secret.current.value='';}})}>仅保存本机凭据</button><p className="muted">{saved?'本机存有连接资料，但尚未验证可用。':'尚未发现已保存的连接资料。'} 保存不会自动连接。</p>
       <fieldset className="confirmation-list"><legend>首次连接前，由本人确认</legend>

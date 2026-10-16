@@ -1,16 +1,19 @@
 # 独立小额Spot直接只读验收
 
-v0.1.11，当前宿主3.10.0；真实验收结果以VALIDATION末节为准。本地读取器仅备用。
+v0.1.14，当前宿主3.10.0；真实验收结果以VALIDATION最新日期节为准。本地读取器仅备用。
 
 ## 本人操作的三个关口
 
-1. 在WRISK独立测试资料库导入0.1.11 ZIP。宿主权限仍只有secrets.set/get/delete、files.openSaveDialog、network.request；主机是data-api.binance.vision、api.binance.com。本人批准两个精确主机并保存，必要时重启宿主。宿主只限制主机，不限制路径；本项目固定GET白名单，没有账本读写权限。
+1. 在WRISK独立测试资料库导入本轮唯一0.1.14 ZIP，管理器核对版本。宿主权限仍只有secrets.set/get/delete、files.openSaveDialog、network.request；主机是data-api.binance.vision、api.binance.com。保留已有准确授权，不扩主机。宿主只限制主机，不限制路径；本项目固定GET白名单，没有账本读写权限。
 2. 本人在币安官方API管理检查独立几千元测试账户的HMAC只读Key，核对UID。本人已接受不强制IP白名单；仍禁用交易、提现、内部/通用划转、杠杆/合约/期权等。有已保存资料时无需为了升级重输Key/Secret。确需替换时只填本机插件密码框并点击“仅保存本机凭据”，保存后密码框清空。**期间助手停止桌面观察；不要发Key、Secret、UID、权限截图或账户文件到聊天。**
 3. 本人核对测试资料库的外部AI Provider禁用、账户/持仓/现金工具未授权，不沿用旧聊天/附件；不改其他资料库或全局DeepSeek。本人接受“签名URL可能进入本机宿主错误日志”的剩余风险，勾选四项确认并亲自点击首次查询。该确认不允许Key/Secret泄露、日志上传或放宽SSL/只读限制。首次会发送签名权限查询（这本身需要确认），只有权限检查通过才发余额查询。
 
 若AI权限只能全局改变，先停止并由用户决定；不能假设独立资料库自动隔离。本插件没有控制Provider权限的能力；不通过聊天或AI工具分析真实资产。
 
 ## 对账和自动刷新
+
+- 当前首次链路只执行Spot主机公开time、签名权限、签名余额；第一个合格时间样本即继续，不等待第三次失败。成功后直接显示币种/数量，没报价时价格和估值为不可用，不是连接失败。不必为了首次验收开启自动刷新或更新行情。
+- “更新公开估值”是独立按钮，只读取既有五个公开市场。首次/自动余额同步不再触发行情；报价超过6分钟后显示缺价，需要本人手动更新。不得将五个市场覆盖说成所有资产均有价格。
 
 - 无需EXE/复制JSON，插件直接显示external数量、free/locked合计、可靠USDT报价、估值、已定价部分占比、采集时间和缺口。不将USDT当USD，不推断LD等前缀/成本/收益；未知资产保留unknown，缺价不作0。全部余额字段缺失/重复/不合法拒绝，成功空数组才是真零。
 - 与币安Spot页逐项核对free/locked/总数量及资产行数；Funding/Stocks不属于覆盖范围。仅本机会话显示，不能写主程序账本/导出/备份；只记录脱敏“对账通过/失败”，不记录真实UID/数量或原始日志。
@@ -32,6 +35,10 @@ v0.1.11，当前宿主3.10.0；真实验收结果以VALIDATION末节为准。本
 开始查询时connected只是会话已授权，不能当作已取得资产。表单保留至success成功接纳快照，避免首次请求中或失败后UID/确认项因卸载丢失；成功后仍隐藏密码框。-2008保守归为认证错误，分类依据是CCXT上游适配器（注明undocumented），不是币安官方已公开确认的根因。收到该码不自动替换凭据、不读取已存内容判断真假。
 
 ## 依据与复用范围
+
+v0.1.13只等待本人一次真实查询：无需重填/重存现有Key和Secret。若失败，仅回报SPOT_INVALID后显示的HTTP/JSON、层级、固定字段路径和原因，例如balances[1].free / DECIMAL_STRING_REQUIRED；不要回报字段值或截图。若仍是未分类回退或缺信息，本轮明确记录证据不足并停止，不索取真实响应、不再盲试。
+
+v0.1.12诊断：先在未连接的连接设置中点击“公开时间对照（不读凭据）”，MARKET/SPOT分别是现有两个主机，每主机最多3次串行公开time。校时失败显示四项固定原因、单调耗时和可用偏移，不等同于电脑时钟必错。HOST_REQUEST_FAILED仅说明宿主调用拒绝，无法由String判断TLS/DNS/原生超时；SPOT_TIMEOUT明确为插件等待超时，底层未完不能重叠。公开结果不代表已查权限/UID/余额，真实查询仍由本人点击。
 
 - [Binance account官方接口](https://developers.binance.com/docs/binance-spot-api-docs/rest-api/account-endpoints)：GET account、SPOT、uid、balances；账户canTrade等不是Key只读证明。
 - [Binance API权限官方接口](https://developers.binance.com/docs/wallet/account/api-key-permission)：GET apiRestrictions。enableReading须为true；ipRestrict仍须明确布尔值，v0.1.11根据本人新决定接受false；9项交易/提现/划转等字段须明确false，新未知true权限拒绝。缺字段不能猜作false。
