@@ -151,7 +151,7 @@ test('行情诊断映射区分无候选、无市场、部分覆盖及预算截�
   ['budget-limited','QUOTE_BUDGET_LIMITED',/覆盖受请求预算限制/],
  ] as const){
   const detail=describeDiagnostic({stage:'quotes',code,quote:{...base,status,budgetReason:status==='budget-limited'?'candidate-cap':undefined}});
-  assert.equal(detail.code,code);assert.match(detail.text,pattern);assert.match(detail.metadata,/未覆盖1/);
+  assert.equal(detail.code,code);assert.match(detail.text,pattern);assert.match(detail.metadata,/未检查候选1/);assert.doesNotMatch(detail.metadata,/未覆盖1/);
  }
  const hostile=describeDiagnostic({stage:'quotes',code:'QUOTE_PARTIAL',quote:{...base,status:'partial',requestCount:'secret' as any,budgetReason:'secret' as any}});
  assert.ok(!JSON.stringify(hostile).includes('secret'));

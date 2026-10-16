@@ -51,7 +51,7 @@ export function describeDiagnostic(d:DirectDiagnostic){
     const count=(value:unknown)=>Number.isSafeInteger(value)&&Number(value)>=0&&Number(value)<=10_000?Number(value):undefined;
     const values=[
       ['候选',q.candidateCount],['已验证市场',q.marketCount],['新报价',q.pricedCount],
-      ['请求失败',q.failedRequestCount],['未覆盖',q.unexaminedCount],['请求数',q.requestCount],['单项回退',q.fallbackRequestCount]
+      ['请求失败',q.failedRequestCount],['未检查候选',q.unexaminedCount],['请求数',q.requestCount],['单项回退',q.fallbackRequestCount]
     ] as const;
     for(const [label,value] of values){const n=count(value);if(n!==undefined)parts.push(label+n);}
     if(q.budgetReason&&['request-cap','fallback-cap','candidate-cap'].includes(q.budgetReason))parts.push('覆盖限制'+q.budgetReason);
@@ -81,8 +81,18 @@ export function DirectSpotPanel({reader,credentials}:{reader:DirectSpot;credenti
   const risk=useRef<HTMLInputElement>(null),small=useRef<HTMLInputElement>(null),permissions=useRef<HTMLInputElement>(null),ai=useRef<HTMLInputElement>(null),reconciled=useRef<HTMLInputElement>(null);
   const {state,report}=reader.valued(),status=reader.getStatus(),diagnostic=reader.getDiagnostic(),detail=describeDiagnostic(diagnostic);
   const snapshots=Object.values(state.snapshots),positions=snapshots.flatMap(s=>s.positions.map(p=>({s,p}))),hasSnapshot=snapshots.length>0;
-  const label=status.busy?'同步中':!status.connected?(hasSnapshot?'已断开':'未连接'):report.currentAccountIds.length?'已连接':hasSnapshot?'数据失效':'待验证';
-  const healthy=label==='已连接',hasError=!['NOT_CONNECTED','RUNNING','OK','USER_DISCONNECTED','PAGE_PAUSED'].includes(detail.code);
+  const quoteDiagnostic=diagnostic.stage==='quotes',quoteCode=quoteDiagnostic?detail.code:'';
+  const quoteSeverity: 'success'|'info'|'warning'|'error'=quoteCode==='QUOTE_COMPLETE'?'success':
+    ['QUOTE_NO_MARKET','QUOTE_NO_CANDIDATES','QUOTE_DISCONNECTED','QUOTE_BUSY','RUNNING'].includes(quoteCode)?'info':
+    ['QUOTE_PARTIAL','QUOTE_BUDGET_LIMITED'].includes(quoteCode)?'warning':'error';
+  const quoteTitle:Record<string,string>={
+    QUOTE_COMPLETE:'公开行情已更新',QUOTE_NO_MARKET:'公开行情说明',QUOTE_NO_CANDIDATES:'公开行情说明',
+    QUOTE_PARTIAL:'公开行情部分可用',QUOTE_BUDGET_LIMITED:'公开行情覆盖受限',
+    QUOTE_REQUEST_FAILED:'公开行情更新失败',QUOTE_TIMEOUT:'公开行情等待超时',QUOTE_RATE_LIMIT:'公开行情受到限流',
+    QUOTE_INVALID:'公开行情响应无效',QUOTE_DISCONNECTED:'公开行情已暂停',QUOTE_BUSY:'公开行情请求进行中',RUNNING:'正在更新公开行情'
+  };
+  const label=status.busy&&!quoteDiagnostic?'同步中':!status.connected?(hasSnapshot?'已断开':'未连接'):report.currentAccountIds.length?'已连接':hasSnapshot?'数据失效':'待验证';
+  const healthy=label==='已连接',hasError=!['NOT_CONNECTED','RUNNING','OK','USER_DISCONNECTED','PAGE_PAUSED'].includes(detail.code)&&!quoteDiagnostic;
   useEffect(()=>{
     let active=true;void credentials.isSaved().then(v=>{if(active)setSaved(v);}).catch(()=>{if(active)setMessage('凭据状态未知，请本人在此重新保存或清理。');});
     const visibility=()=>reader.setVisible(document.visibilityState==='visible'&&window.innerWidth>0&&window.innerHeight>0);
@@ -94,6 +104,7 @@ export function DirectSpotPanel({reader,credentials}:{reader:DirectSpot;credenti
   return <section className="monitor" aria-label="真实Spot资产监控">
     <header className="monitor-header"><div><p className="eyebrow">BINANCE · SPOT</p><h1>币安资产监控</h1><p className="muted">独立账户 · USDT计价</p></div><span className={'status-badge '+(healthy?'is-good':hasError?'is-error':'is-neutral')}>{label}</span></header>
     {(!healthy||hasError)&&<div className={'connection-notice '+(hasError?'notice-error':'')} role="status"><div><strong>{hasError?detail.stage+'未完成':status.busy?detail.stage:hasSnapshot?'当前数据不可用':'连接你的币安账户'}</strong><p>{status.busy?'正在同步，请稍候。':detail.text}</p>{hasError&&<code>{detail.stage} · {detail.code}{detail.code==='SPOT_INVALID'&&detail.metadata?' · '+detail.metadata:''}</code>}</div><button onClick={()=>setSettings(true)}>连接设置</button></div>}
+    {quoteDiagnostic&&<div className={'connection-notice quote-notice'+(quoteSeverity==='error'?' notice-error':quoteSeverity==='warning'?' notice-warning':'')} style={quoteSeverity==='warning'?{borderLeft:'3px solid #b89a56'}:undefined} data-quote-state={quoteSeverity} role="status" aria-label="公开行情状态"><div><strong>{quoteTitle[quoteCode]??'公开行情状态'}</strong><p>{detail.text}</p><code>公开行情 · {detail.code}{detail.metadata?' · '+detail.metadata:''}</code></div></div>}
     <div className="monitor-toolbar"><span className="muted">{hasSnapshot?(report.currentAccountIds.length?'真实Spot快照':'保留上次持仓 · 已失效'):'尚无真实余额数据'}</span><div className="button-row"><button disabled={!status.retry.canRetry||saving} onClick={()=>void work(()=>reader.sync())}>{status.busy?'刷新中…':'刷新持仓'}</button><button disabled={!status.success||!report.currentAccountIds.length||!status.retry.canRetry||saving} onClick={()=>void work(()=>reader.refreshQuotes())}>更新公开估值</button><button onClick={()=>setSettings(v=>!v)} aria-expanded={settings}>连接设置</button></div></div>
     <p className="muted">首次连接只读取Spot币种和数量。公开估值可在连接后单独更新，缺价不会阻止持仓显示。</p>
     <p className="muted retry-status" role="status">{describeRetry(status.retry)}</p>

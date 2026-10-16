@@ -226,10 +226,10 @@ export class SpotQuoteReader {
         }
       }
       if(epoch!==this.epoch)throw new PublicMarketError('disconnected');
+      if(this.prices.size===0&&failedRequestCount>0)return result('request-failed');
       if(stopForBudget||budget.budgetReason)return result('budget-limited');
       if(!allCandidates.length)return result('no-candidates');
       if(markets.size===0)return result(failedRequestCount?'request-failed':'no-market');
-      if(this.prices.size===0&&failedRequestCount>0)return result('request-failed');
       const fullyPriced=allCandidates.length===candidates.length&&unpriceableCount===0&&markets.size===candidates.length&&this.prices.size===markets.size&&failedRequestCount===0;
       return result(fullyPriced?'complete':'partial');
     }catch(error){this.prices.clear();throw error instanceof PublicMarketError?error:new PublicMarketError('invalid');}

@@ -382,3 +382,33 @@ test('后续行情故障不会把前次报价冒充为本次成功报价',async(
  fail=true;const second=await reader.refreshSpotAssets(['BTC','ETH']);
  assert.equal(second.status,'request-failed');assert.equal(second.pricedCount,0);assert.equal(reader.getSpotQuotes().size,0);
 });
+
+test('候选截断与请求失败并存时优先报告请求失败并保留预算摘要',async()=>{
+ const assets=Array.from({length:101},(_,i)=>'COIN'+String(i).padStart(3,'0'));
+ let failedCalls=0;
+ const failed=new SpotQuoteReader({request:async()=>{failedCalls++;return response({error:'fixture'},503);}},()=>NOW);
+ const failure=await failed.refreshSpotAssets(assets);
+ assert.equal(failure.status,'request-failed');assert.equal(failure.budgetReason,'candidate-cap');
+ assert.equal(failure.unexaminedCount,1);assert.equal(failure.requestCount,5);assert.equal(failure.failedRequestCount,5);
+ assert.equal(failure.pricedCount,0);assert.equal(failedCalls,5);
+
+ const covered=new SpotQuoteReader({request:async request=>{
+  const symbols=requestedSymbols(request),path=new URL(request.url).pathname;
+  return path.endsWith('/exchangeInfo')
+   ?response({symbols:symbols.map(s=>marketRow(s.slice(0,-4)))})
+   :response(symbols.map(symbol=>({symbol,price:'1.25'})));
+ }},()=>NOW);
+ const limited=await covered.refreshSpotAssets(assets);
+ assert.equal(limited.status,'budget-limited');assert.equal(limited.budgetReason,'candidate-cap');
+ assert.equal(limited.unexaminedCount,1);assert.equal(limited.pricedCount,100);assert.equal(limited.requestCount,10);
+
+ const ordinary=new SpotQuoteReader({request:async request=>{
+  const symbols=requestedSymbols(request),path=new URL(request.url).pathname;
+  return path.endsWith('/exchangeInfo')
+   ?response({symbols:symbols.map(s=>marketRow(s.slice(0,-4)))})
+   :response(symbols.map(symbol=>({symbol,price:'1.25'})));
+ }},()=>NOW);
+ const complete=await ordinary.refreshSpotAssets(['BTC','ETH']);
+ assert.equal(complete.status,'complete');assert.equal(complete.budgetReason,undefined);
+ assert.equal(complete.unexaminedCount,0);assert.equal(complete.pricedCount,2);
+});

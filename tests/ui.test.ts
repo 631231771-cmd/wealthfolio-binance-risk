@@ -6,6 +6,7 @@ const {renderToStaticMarkup}=createRequire(import.meta.url)('react-dom/server') 
 import {DirectSpotPanel,describeDiagnostic,describeRetry,formatPrice} from '../src/direct-panel';
 import type {DirectSpot,DirectDiagnostic} from '../src/direct-spot';
 import type {BinanceCredentials} from '../src/credentials';
+import type {SpotQuoteRefreshResult} from '../src/public-market';
 import {spotSnapshot,spotShock} from '../src/spot';
 import {assetKey,calculateRisk,type PortfolioState} from '../src/domain';
 const at='2026-10-15T00:00:00.000Z';
@@ -16,6 +17,7 @@ function render(state:PortfolioState,connected:boolean,success=connected,busy=fa
  return renderToStaticMarkup(createElement(DirectSpotPanel,{reader,credentials:{} as BinanceCredentials}));
 }
 function sample(){const {account,snapshot}=spotSnapshot({uid:1,accountType:'SPOT',balances:[{asset:'BTC',free:'0.001',locked:'0'},{asset:'USDT',free:'15',locked:'0'},{asset:'NOPAIR',free:'2',locked:'0'}]},'external',at,at);for(const p of snapshot.positions)if(p.asset.code!=='NOPAIR')p.price={value:p.asset.code==='BTC'?'50000':'1',currency:'USDT',asOf:at,source:'external:test'};return {schemaVersion:1 as const,accounts:[account],snapshots:{[account.id]:snapshot},statuses:{[account.id]:{state:'ready' as const,attemptedAt:at}}};}
+function quoteResult(status:SpotQuoteRefreshResult['status'],overrides:Partial<SpotQuoteRefreshResult>={}):SpotQuoteRefreshResult{return {status,assetCount:2,candidateCount:2,marketCount:2,pricedCount:status==='complete'?2:0,failedRequestCount:0,unexaminedCount:0,requestCount:2,fallbackRequestCount:0,...overrides};}
 test('主面板空态、连接设置默认关闭，保留明确本人确认项',()=>{
  const html=render({schemaVersion:1,accounts:[],snapshots:{},statuses:{}},false);
  assert.ok(html.includes('币安资产监控'));assert.ok(html.includes('Spot 已定价资产'));assert.ok(html.includes('连接后显示真实Spot持仓'));
@@ -61,4 +63,44 @@ test('错误阶段与安全码明确区分，未知码不透传任意文本',()=
 test('余额拒绝的主提示直接呈现HTTP/JSON/字段路径/固定原因，不只显示SPOT_INVALID',()=>{
  const html=render({schemaVersion:1,accounts:[],snapshots:{},statuses:{}},false,false,false,{stage:'balance',code:'SPOT_INVALID',httpStatus:200,jsonValid:true,layer:'account-validation',elapsedMs:100,validation:{layer:'balance',path:'balances[2].locked',reason:'DECIMAL_INVALID'}});
  const notice=html.split('class="monitor-toolbar"')[0];for(const text of ['HTTP 200','JSON有效','账户字段校验','balances[2].locked','DECIMAL_INVALID'])assert.ok(notice.includes(text));
+});
+
+test('公开行情成功不显示错误提示且余额连接仍标记已连接',()=>{
+ const html=render(sample(),true,true,false,{stage:'quotes',code:'QUOTE_COMPLETE',quote:quoteResult('complete')});
+ const main=html.split('class="monitor-toolbar"')[0];
+ assert.match(main,/class="status-badge is-good">已连接/);assert.match(main,/data-quote-state="success"/);
+ assert.ok(main.includes('公开行情已更新'));assert.ok(!main.includes('notice-error'));assert.ok(!main.includes('公开报价未完成'));
+});
+
+test('无市场与无候选以中性行情信息显示，不冒充余额连接错误',()=>{
+ for(const [code,status,text] of [['QUOTE_NO_MARKET','no-market','没有可用的USDT现货交易对'],['QUOTE_NO_CANDIDATES','no-candidates','没有需要查询的USDT现货交易对']] as const){
+  const html=render(sample(),true,true,false,{stage:'quotes',code,quote:quoteResult(status)}),main=html.split('class="monitor-toolbar"')[0];
+  assert.match(main,/class="status-badge is-good">已连接/);assert.match(main,/data-quote-state="info"/);
+  assert.ok(main.includes(text));assert.ok(!main.includes('notice-error'));assert.ok(!main.includes('Spot余额读取未完成'));
+ }
+});
+
+test('部分行情和预算截断提示覆盖不足但不冒充完整成功',()=>{
+ for(const [code,status,text] of [['QUOTE_PARTIAL','partial','公开行情部分可用'],['QUOTE_BUDGET_LIMITED','budget-limited','公开行情覆盖受限']] as const){
+  const html=render(sample(),true,true,false,{stage:'quotes',code,quote:quoteResult(status,{pricedCount:1,unexaminedCount:1,budgetReason:status==='budget-limited'?'candidate-cap':undefined})}),main=html.split('class="monitor-toolbar"')[0];
+  assert.match(main,/data-quote-state="warning"/);assert.match(main,/notice-warning/);assert.ok(main.includes(text));assert.ok(!main.includes('notice-error'));assert.ok(!main.includes('公开行情已更新'));
+ }
+});
+
+test('公开行情失败明确归属行情且不撤销已验证Spot连接和持仓',()=>{
+ const q=quoteResult('request-failed',{marketCount:2,pricedCount:0,failedRequestCount:1,unexaminedCount:0,requestCount:3});
+ const html=render(sample(),true,true,false,{stage:'quotes',code:'QUOTE_REQUEST_FAILED',quote:q}),main=html.split('class="monitor-toolbar"')[0];
+ assert.match(main,/class="status-badge is-good">已连接/);assert.match(main,/公开行情更新失败/);
+ assert.ok(main.includes('公开行情请求失败'));assert.ok(html.includes('0.001'));assert.ok(html.includes('65.00'));
+ assert.ok(html.includes('部分覆盖 · 1 项缺价'));assert.ok(!main.includes('Spot余额读取未完成'));
+ assert.ok(main.includes('未检查候选0'));assert.ok(!main.includes('未覆盖0'));
+});
+
+test('行情超时限流无效响应及生命周期状态不冒充余额认证错误',()=>{
+ const cases=[['QUOTE_TIMEOUT','公开行情等待超时','error'],['QUOTE_RATE_LIMIT','公开行情受到限流','error'],['QUOTE_INVALID','公开行情响应无效','error'],['QUOTE_DISCONNECTED','公开行情已暂停','info'],['QUOTE_BUSY','公开行情请求进行中','info']] as const;
+ for(const [code,title,severity] of cases){
+  const html=render(sample(),true,true,false,{stage:'quotes',code}),main=html.split('class="monitor-toolbar"')[0];
+  assert.match(main,new RegExp(`data-quote-state="${severity}"`));assert.ok(main.includes(title));
+  assert.match(main,/class="status-badge is-good">已连接/);assert.ok(!main.includes('Spot余额读取未完成'));
+ }
 });
