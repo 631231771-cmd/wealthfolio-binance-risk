@@ -238,6 +238,21 @@ test('多批报价一批成功一批503时保留新报价并标记部分成功',
  assert.equal(reader.getSpotQuotes().has(assets[20]),false);assert.equal(result.requestCount,4);
 });
 
+test('HTTP200报价结果缺行时按未完成请求处理并保留准确覆盖状态',async()=>{
+ for(const returnedSymbols of [[],['BTCUSDT']]){
+  const reader=new SpotQuoteReader({request:async request=>{
+   const symbols=requestedSymbols(request),path=new URL(request.url).pathname;
+   if(path.endsWith('/exchangeInfo'))return response({symbols:symbols.map(s=>marketRow(s.slice(0,-4)))});
+   return response(returnedSymbols.map(symbol=>({symbol,price:'2.5'})));
+  }},()=>NOW);
+  const result=await reader.refreshSpotAssets(['BTC','ETH']);
+  assert.equal(result.failedRequestCount,1);
+  assert.equal(result.status,returnedSymbols.length?'partial':'request-failed');
+  assert.equal(result.pricedCount,returnedSymbols.length);
+  assert.equal(reader.getSpotQuotes().has('BTC'),returnedSymbols.length===1);
+ }
+});
+
 test('所有市场请求失败不得被误报为无有效市场',async()=>{
  let calls=0;
  const reader=new SpotQuoteReader({request:async()=>{calls++;return response({error:'fixture'},503);}},()=>NOW);

@@ -197,6 +197,8 @@ export class SpotQuoteReader {
             const payload=await this.requestWithinBudget(publicMarketRequest('price',symbols),epoch,budget);
             if(payload===undefined){unexaminedCount+=entries.length-offset;stopForBudget=true;break quotes;}
             const prices=parseTickerPricesPartial(payload,symbols,new Date(this.now()).toISOString());
+            // HTTP 200 不代表结果完整；缺失 ticker 行要进入部分覆盖诊断。
+            if(prices.size<chunk.length)failedRequestCount++;
             for(const [code,symbol] of chunk){
               const price=prices.get(symbol);
               if(price)this.prices.set(code,{...price,source:'external:'+PUBLIC_ORIGIN+'/api/v3/ticker/price（采集时间，非成交时间）'});
