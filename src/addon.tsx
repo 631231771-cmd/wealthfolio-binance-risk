@@ -89,7 +89,7 @@ function BridgePanel({quotes}:{quotes:PublicMarketReader}) {
   </section>;
 }
 
-function RiskPage({ ctx, initial,direct,realCredentials }: { ctx: AddonContext; initial: PortfolioState;direct:DirectSpot;realCredentials:BinanceCredentials }) {
+export function DeveloperWorkbench({ctx,initial,onBack}: {ctx:AddonContext;initial:PortfolioState;onBack?:()=>void}) {
   const [state,setState] = useState(initial), [busy,setBusy] = useState(false), [message,setMessage] = useState('固定模拟基线；没有主程序读写权限');
   const [backup,setBackup] = useState('');
   const credentials=useMemo(()=>new DummyCredentials(ctx.api.secrets),[ctx]);
@@ -109,8 +109,8 @@ function RiskPage({ ctx, initial,direct,realCredentials }: { ctx: AddonContext; 
     return '模拟状态已替换并持久化；没有查询真实账户。';
   };
   return <main className="wrisk-app">
-    <DirectSpotPanel reader={direct} credentials={realCredentials}/>
-    <details className="dev-tools"><summary>开发与测试</summary><div className="dev-tools-content">
+    <header className="section-heading"><h1>开发工作台 · 仅模拟数据</h1><button onClick={onBack}>返回资产总览</button></header>
+    <details className="dev-tools" open><summary>开发与测试</summary><div className="dev-tools-content">
     <h2>开发与测试 · 非真实资产总览</h2>
     <p className="notice">以下旧功能独立保留，不计入上方真实Spot统计。旧离线入口真实认证请求阻断保留。旧样例时钟：{FIXTURE_TIME}；Stocks未支持。</p>
     <BridgePanel quotes={publicReader}/>
@@ -168,7 +168,10 @@ const enable: AddonEnableFunction = async ctx => {
     try { initial = restoreState(JSON.stringify({schemaVersion:1,dataMode:'fixture',state:JSON.parse(saved)})); calculateRisk(initial,'USD',[]); }
     catch { ctx.api.toast.error('已有模拟状态格式无效，未将其认定为成功同步'); }
   }
-  const Page = () => <RiskPage ctx={ctx} initial={initial} direct={direct} realCredentials={realCredentials} />;
+  const Page = () => {
+    const [developer,setDeveloper]=useState(false);
+    return developer?<DeveloperWorkbench ctx={ctx} initial={initial} onBack={()=>setDeveloper(false)}/>:<main className="wrisk-app"><DirectSpotPanel reader={direct} credentials={realCredentials} onOpenDeveloper={()=>setDeveloper(true)}/></main>;
+  };
   ctx.router.add({ id:'wealthfolio-binance-risk',path:'/addons/wealthfolio-binance-risk',component:Page });
 };
 export default enable;

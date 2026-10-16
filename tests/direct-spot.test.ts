@@ -166,11 +166,11 @@ test('真零、6分钟TTL与5分钟刷新一致',async()=>{
 test('自动默认关闭、须对账，隐藏暂停/返回补查/断开不再发请求',async()=>{
  const h=await harness();assert.throws(()=>h.reader.setAuto(true,true));h.reader.authorize('1',ack);await h.reader.sync();assert.throws(()=>h.reader.setAuto(true));h.reader.setAuto(true,true);
  const first=h.calls.length;h.reader.setVisible(false);h.advance(DIRECT_INTERVAL+1);await h.reader.tick();assert.equal(h.calls.length,first);
- h.reader.setVisible(true);await h.reader.tick();assert.ok(h.calls.length>first);const second=h.calls.length;await h.reader.tick();assert.equal(h.calls.length,second);
+ h.reader.setVisible(true);await h.reader.tick();assert.ok(h.calls.length>first);const privateCount=h.calls.filter(p=>p.endsWith('/account')).length;await h.reader.tick();assert.equal(h.calls.filter(p=>p.endsWith('/account')).length,privateCount);const second=h.calls.length;await h.reader.tick();assert.equal(h.calls.length,second);
  h.reader.disconnect();h.advance(DIRECT_INTERVAL*3);await h.reader.tick();assert.equal(h.calls.length,second);assert.equal(h.reader.getStatus().auto,false);
 });
 test('失败保留旧数量/当前不可用、固定错误、退避及429不能开关绕过',async()=>{
- const h=await harness();h.reader.authorize('1',ack);await h.reader.sync();h.reader.setAuto(true,true);h.advance(DIRECT_INTERVAL+1);h.setMode('network');await h.reader.tick();assert.equal(h.reader.valued().report.coveredSubtotal,null);assert.equal(Object.values(h.reader.getState().snapshots)[0].positions.length,3);assert.ok(!/TEST_SECRET|signature|https:/.test(h.reader.message));const first=h.calls.length;h.advance(DIRECT_INTERVAL);await h.reader.tick();assert.equal(h.calls.length,first);
+ const h=await harness();h.reader.authorize('1',ack);await h.reader.sync();h.reader.setAuto(true,true);h.advance(DIRECT_INTERVAL+1);h.setMode('network');await h.reader.tick();assert.equal(h.reader.valued().report.coveredSubtotal,null);assert.equal(Object.values(h.reader.getState().snapshots)[0].positions.length,3);assert.ok(!/TEST_SECRET|signature|https:/.test(h.reader.message));const first=h.calls.filter(p=>p.endsWith('/apiRestrictions')).length;h.advance(DIRECT_INTERVAL);await h.reader.tick();assert.equal(h.calls.filter(p=>p.endsWith('/apiRestrictions')).length,first);
  h.advance(DIRECT_INTERVAL+1);h.setMode('limit');await h.reader.tick();const due=h.reader.getStatus().nextDue;h.reader.setAuto(false);h.reader.setAuto(true,true);assert.equal(h.reader.getStatus().nextDue,due);
 });
 test('SDK超时后底层未结束不重叠，断开后迟到结果不发布',async()=>{
@@ -178,4 +178,30 @@ test('SDK超时后底层未结束不重叠，断开后迟到结果不发布',asy
 });
 test('页面暂停时在途结果丢弃，不能发后续认证或发布余额',async()=>{
  const h=await harness();h.reader.authorize('1',ack);h.block('/sapi/v1/account/apiRestrictions');const task=h.reader.sync();while(!h.calls.includes('/sapi/v1/account/apiRestrictions'))await new Promise(r=>setTimeout(r,1));h.reader.setVisible(false);h.release();await task;assert.ok(!h.calls.includes('/api/v3/account'));assert.equal(h.reader.getState().accounts.length,0);
+});
+
+test('公开行情默认每分钟刷新，与余额TTL和认证退避独立；历史估值保留且不进入当前合计',async()=>{
+ const h=await harness();h.reader.authorize('1',ack);await h.reader.sync();
+ const authCount=()=>h.calls.filter(p=>p.endsWith('/account')||p.endsWith('/apiRestrictions')).length;
+ const before=authCount();await h.reader.tick();assert.equal(authCount(),before);assert.equal(h.reader.getStatus().auto,false);
+ assert.equal(h.reader.valued().report.coveredSubtotal,'65.00000000');
+ assert.equal(h.reader.getReference()?.report.coveredSubtotal,'65.00000000');
+ const count=h.calls.length;h.advance(59_999);await h.reader.tick();assert.equal(h.calls.length,count);
+ h.advance(1);await h.reader.tick();assert.equal(h.calls.length,count+1); // cached metadata; ticker only
+ h.advance(DIRECT_TTL);await h.reader.tick();assert.equal(authCount(),before);
+ assert.equal(h.reader.valued().report.coveredSubtotal,null);assert.equal(h.reader.getHistoricalQuotes().get('BTC')?.value,'50000');
+ assert.equal(h.reader.getReference()?.report.coveredSubtotal,'65.00000000');
+ h.reader.setVisible(false);h.advance(100_000);const hidden=h.calls.length;await h.reader.tick();assert.equal(h.calls.length,hidden);
+ h.reader.setVisible(true);await h.reader.tick();assert.ok(h.calls.length>hidden);assert.equal(authCount(),before);
+ h.reader.disconnect();const stopped=h.calls.length;h.advance(600_000);await h.reader.tick();assert.equal(h.calls.length,stopped);
+});
+
+test('公开行情失败保留历史报价和估值；失败后退避、成功恢复，不把旧价当本次成功',async()=>{
+ const h=await harness();h.reader.authorize('1',ack);await h.reader.sync();await h.reader.tick();
+ h.setQuoteFailure(true);h.advance(60_000);await h.reader.tick();
+ assert.equal(h.reader.valued().report.coveredSubtotal,'15.00000000');
+ assert.equal(h.reader.getHistoricalQuotes().get('BTC')?.value,'50000');
+ assert.equal(h.reader.getReference()?.report.coveredSubtotal,'65.00000000');
+ const count=h.calls.length;h.advance(60_000);await h.reader.tick();assert.equal(h.calls.length,count);
+ h.setQuoteFailure(false);h.advance(60_000);await h.reader.tick();assert.equal(h.reader.valued().report.coveredSubtotal,'65.00000000');
 });

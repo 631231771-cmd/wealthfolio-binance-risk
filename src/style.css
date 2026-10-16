@@ -1,91 +1,144 @@
-.wrisk-app { --line: color-mix(in srgb,currentColor 13%,transparent); --muted: color-mix(in srgb,currentColor 62%,transparent); --surface: color-mix(in srgb,currentColor 3%,transparent); --soft: color-mix(in srgb,currentColor 5%,transparent); max-width:1180px; padding:28px; margin:auto; font-family:system-ui,-apple-system,sans-serif; color:inherit; line-height:1.55; box-sizing:border-box; }
+/* All rules stay inside the addon root. */
+.wrisk-app { font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; line-height:1.55; margin:auto; box-sizing:border-box; }
 .wrisk-app * { box-sizing:border-box; }
 .wrisk-app h1,.wrisk-app h2,.wrisk-app h3,.wrisk-app p { margin:0; }
-.wrisk-app h1 { font-size:26px; font-weight:700; letter-spacing:-.6px; line-height:1.2; }
-.wrisk-app h2 { font-size:16px; font-weight:650; }
-.wrisk-app h3 { font-size:14px; font-weight:650; }
+.wrisk-app h2 { font-size:16px; } .wrisk-app h3 { font-size:14px; }
 .wrisk-app .muted,.wrisk-app small { color:var(--muted); }
-.wrisk-app button { display:inline-flex; align-items:center; justify-content:center; min-height:36px; padding:7px 14px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:inherit; font:inherit; font-size:13px; line-height:1.4; cursor:pointer; white-space:normal; transition:background .15s,border-color .15s; }
-.wrisk-app button:hover:not(:disabled) { background:var(--soft); border-color:color-mix(in srgb,currentColor 28%,transparent); }
-.wrisk-app button:focus-visible,.wrisk-app summary:focus-visible { outline:2px solid #83984a; outline-offset:3px; }
+.wrisk-app button { display:inline-flex; align-items:center; justify-content:center; min-height:36px; padding:7px 14px; border:1px solid var(--line); border-radius:7px; background:var(--surface); color:inherit; font:inherit; font-size:12px; cursor:pointer; }
+.wrisk-app button:hover:not(:disabled) { background:var(--soft); }
 .wrisk-app button:disabled { opacity:.42; cursor:not-allowed; }
-.wrisk-app .button-primary { background:#c3d27b; border-color:#c3d27b; color:#1e2613; font-weight:650; }
-.wrisk-app .button-primary:hover:not(:disabled) { background:#d2df94; }
-.wrisk-app .button-quiet { border-color:transparent; background:transparent; color:var(--muted); }
-.wrisk-app .button-danger { color:#d97770; }
-.monitor-header,.monitor-toolbar,.section-heading,.monitor-footer { display:flex; align-items:center; justify-content:space-between; gap:16px; }
-.monitor-header { margin-bottom:24px; }
-.eyebrow { font-size:10px; letter-spacing:1.7px; color:var(--muted); margin-bottom:8px!important; }
-.monitor-header .muted { margin-top:7px; font-size:12px; }
-.status-badge { padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600; border:1px solid var(--line); white-space:nowrap; }
-.status-badge.is-good { background:#70a96d18; color:#82b87b; border-color:#82b87b35; }
-.status-badge.is-error { background:#d46e6318; color:#d77e73; border-color:#d46e6335; }
-.status-badge.is-neutral { color:var(--muted); background:var(--surface); }
-.connection-notice { padding:18px 20px; border:1px solid var(--line); border-radius:12px; background:var(--surface); display:flex; align-items:center; justify-content:space-between; gap:20px; margin-bottom:20px; font-size:13px; }
-.connection-notice p { color:var(--muted); margin-top:5px; }
-.connection-notice code { display:block; color:var(--muted); font-size:11px; margin-top:7px; }
-.connection-notice.notice-error { border-left:3px solid #c67b62; }
-.monitor-toolbar { margin-bottom:16px; font-size:12px; }
-.wrisk-app .retry-status { font-size:11px; margin:-7px 0 16px; }
-.button-row { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
-.metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:24px; }
-.metric-card { min-height:123px; padding:18px 18px 16px; border:1px solid var(--line); border-radius:12px; background:var(--surface); min-width:0; }
-.metric-card>span { display:block; color:var(--muted); font-size:12px; }
-.metric-card>strong { display:block; margin-top:9px; font-size:26px; font-weight:650; letter-spacing:-.5px; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; line-height:1.3; }
-.metric-card small { font-size:12px; font-weight:500; letter-spacing:0; }
-.metric-card p { margin-top:8px; font-size:11px; color:var(--muted); }
-.metric-card .time-value { font-size:16px; letter-spacing:0; line-height:1.6; }
-.holdings-card { border:1px solid var(--line); border-radius:12px; overflow:hidden; }
-.section-heading { padding:18px 20px; font-size:12px; }
-.table-scroll { overflow-x:auto; }
-.wrisk-app table { width:100%; border-collapse:collapse; font-size:13px; }
-.wrisk-app th,.wrisk-app td { text-align:left; border-bottom:1px solid var(--line); padding:14px 20px; overflow-wrap:anywhere; }
-.wrisk-app th { font-size:11px; color:var(--muted); font-weight:550; background:var(--surface); }
-.holdings-table { min-width:570px; }
-.holdings-table td:not(:first-child),.holdings-table th:not(:first-child) { text-align:right; }
-.holdings-table .number { font-variant-numeric:tabular-nums; }
-.row-state { font-size:11px; white-space:nowrap; }
-.empty-holdings { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:42px 20px 44px; text-align:center; }
-.empty-holdings>span { color:var(--muted); font-size:28px; margin-bottom:4px; }
-.empty-holdings strong { font-size:14px; font-weight:550; }
-.empty-holdings p { color:var(--muted); font-size:12px; }
-.empty-holdings button { margin-top:10px; }
-.coverage-note { padding:12px 20px; color:var(--muted); font-size:11px; }
-.monitor-footer { padding:16px 0; font-size:12px; color:var(--muted); }
-.status-dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--muted); margin-right:7px; vertical-align:middle; }
-.status-dot.is-on { background:#a5bd6d; }
-.connection-settings { margin-top:8px; border:1px solid var(--line); border-radius:12px; }
-.connection-settings:not([open]) { display:none; }
-.wrisk-app summary { cursor:pointer; font-size:13px; font-weight:550; padding:14px 20px; }
-.connection-settings>summary { display:none; }
-.settings-content { padding:4px 22px 22px; }
-.settings-content>.section-heading { padding:16px 0; }
-.settings-content p { font-size:12px; margin:10px 0; }
-.settings-diagnostic { display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--surface); border-radius:8px; padding:10px 14px; margin:16px 0; font-size:12px; }
-.settings-diagnostic code { font-size:11px; color:var(--muted); }
-.settings-diagnostic p { flex-basis:100%; margin:0; color:var(--muted); }
-.credential-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin:16px 0; }
-.credential-grid label { display:block; font-size:12px; color:var(--muted); }
-.credential-grid label:first-child { grid-column:1/-1; max-width:420px; }
-.credential-grid input { display:block; width:100%; padding:10px 12px; margin-top:6px; min-height:40px; border:1px solid var(--line); border-radius:7px; background:var(--surface); color:inherit; }
-.credential-grid input:focus { outline:1px solid #9aac62; }
-.confirmation-list { border:1px solid var(--line); border-radius:8px; padding:12px 16px; margin:20px 0; }
-.confirmation-list legend { padding:0 6px; font-size:12px; color:var(--muted); }
-.confirmation-list label,.check-label { display:flex; align-items:flex-start; gap:10px; font-size:12px; margin:10px 0; }
-.confirmation-list input,.check-label input { flex:0 0 auto; margin-top:4px; accent-color:#aaba71; }
-.settings-refresh { margin-top:24px; padding-top:20px; border-top:1px solid var(--line); }
-.settings-message { background:var(--soft); padding:10px 14px; border-radius:6px; }
-.help-details { margin-top:16px; border-top:1px solid var(--line); }
-.help-details summary { padding:12px 0; color:var(--muted); }
-.help-details p { color:var(--muted); }
-.dev-tools { margin-top:18px; border-top:1px solid var(--line); color:var(--muted); }
-.dev-tools>summary { padding:16px 0; font-size:12px; font-weight:400; }
-.dev-tools-content { padding:20px; border:1px dashed var(--line); border-radius:10px; color:inherit; font-size:13px; }
-.dev-tools-content h2 { margin:16px 0; }
-.dev-tools-content p,.dev-tools-content ul { margin:12px 0; }
-.dev-tools-content section { border-bottom:1px solid var(--line); padding:14px 0; }
-.dev-tools-content textarea { display:block; width:100%; min-height:80px; margin:8px 0; border:1px solid var(--line); border-radius:6px; padding:10px; }
-.dev-tools-content .actions { display:flex; flex-wrap:wrap; gap:8px; }
-.notice { border-left:3px solid #aa995f; padding:10px 14px; }
-@media(max-width:1000px) { .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-@media(max-width:600px) { .wrisk-app { padding:18px 14px; } .wrisk-app h1 { font-size:22px; } .monitor-header { margin-bottom:18px; } .connection-notice { align-items:flex-start; flex-direction:column; padding:15px; gap:12px; } .metric-card { padding:14px; min-height:112px; } .metric-card>strong { font-size:22px; } .monitor-toolbar { align-items:flex-start; } .metric-grid { gap:9px; margin-bottom:18px; } .monitor-footer { flex-wrap:wrap; gap:8px; } .credential-grid { grid-template-columns:1fr; } .settings-content { padding:4px 15px 15px; } .dev-tools-content { padding:12px; } }
+.wrisk-app .button-quiet { background:transparent; }
+.wrisk-app .button-danger { color:#e0a3a0; }
+.wrisk-app .monitor-header,.wrisk-app .monitor-toolbar,.wrisk-app .section-heading,.wrisk-app .monitor-footer { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.wrisk-app .monitor-toolbar { flex-wrap:wrap; }
+.wrisk-app .button-row { display:flex; flex-wrap:wrap; gap:8px; }
+.wrisk-app .status-badge { padding:5px 10px; border-radius:20px; white-space:nowrap; }
+.wrisk-app .table-scroll { overflow-x:auto; }
+.wrisk-app .empty-holdings { display:flex; flex-direction:column; align-items:center; gap:9px; padding:48px 20px; text-align:center; color:var(--muted); }
+.wrisk-app .empty-holdings>span { font-size:28px; } .wrisk-app .empty-holdings strong { color:#c2cfe0; }
+.wrisk-app .status-dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--muted); margin-right:7px; vertical-align:middle; }
+.wrisk-app .connection-notice { display:flex; align-items:center; justify-content:space-between; gap:14px; }
+.wrisk-app .connection-notice p { margin-top:5px; }
+.wrisk-app .connection-settings { border-radius:12px; }
+.wrisk-app .connection-settings:not([open]),.wrisk-app .connection-settings>summary { display:none; }
+.wrisk-app summary { cursor:pointer; }
+.wrisk-app .settings-content { padding:20px 22px; }
+.wrisk-app .settings-content p { margin:10px 0; font-size:12px; }
+.wrisk-app .settings-diagnostic { background:#101721; padding:14px; border-radius:8px; margin:16px 0; }
+.wrisk-app .settings-diagnostic code { display:block; font-size:11px; color:var(--muted); overflow-wrap:anywhere; }
+.wrisk-app .credential-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:18px 0; }
+.wrisk-app .credential-grid label { font-size:12px; color:var(--muted); }
+.wrisk-app .credential-grid label:first-child { grid-column:1/-1; }
+.wrisk-app .credential-grid input { display:block; width:100%; min-height:40px; border-radius:6px; padding:10px 12px; margin-top:6px; }
+.wrisk-app .confirmation-list { border:1px solid var(--line); border-radius:8px; padding:12px 16px; margin:20px 0; }
+.wrisk-app .confirmation-list legend { padding:0 6px; font-size:12px; color:var(--muted); }
+.wrisk-app .confirmation-list label,.wrisk-app .check-label { display:flex; align-items:flex-start; gap:10px; font-size:12px; margin:10px 0; }
+.wrisk-app .confirmation-list input,.wrisk-app .check-label input { flex:0 0 auto; margin-top:4px; accent-color:#a6c1e2; }
+.wrisk-app .settings-refresh { margin-top:22px; padding-top:18px; border-top:1px solid var(--line); }
+.wrisk-app .settings-message { padding:10px; background:var(--soft); }
+.wrisk-app .help-details { border-top:1px solid var(--line); margin-top:20px; padding-top:14px; }
+.wrisk-app .help-details summary,.wrisk-app .help-details p { color:var(--muted); font-size:12px; }
+.wrisk-app .dev-tools { margin-top:24px; }
+.wrisk-app .dev-tools-content { border:1px dashed var(--line); padding:22px; margin-top:18px; overflow:auto; }
+.wrisk-app .dev-tools-content h2 { margin:18px 0; }
+.wrisk-app .dev-tools-content p,.wrisk-app .dev-tools-content ul { margin:12px 0; }
+.wrisk-app .dev-tools-content table { border-collapse:collapse; width:100%; font-size:12px; }
+.wrisk-app .dev-tools-content th,.wrisk-app .dev-tools-content td { border-bottom:1px solid var(--line); padding:10px; text-align:left; }
+.wrisk-app .dev-tools-content section { padding:14px 0; border-bottom:1px solid var(--line); }
+.wrisk-app .dev-tools-content textarea { display:block; width:100%; min-height:80px; margin:10px 0; }
+.wrisk-app .dev-tools-content .actions { display:flex; flex-wrap:wrap; gap:8px; }
+@media(max-width:620px) { .wrisk-app .credential-grid { grid-template-columns:1fr; } .wrisk-app .connection-notice { flex-direction:column; align-items:flex-start; } }
+/* Portfolio workspace: scoped to the addon; no host theme or global settings changes. */
+.wrisk-app { --line:#29313d; --muted:#9aa8bb; --surface:#171e29; --soft:#202a38; color:#e6edf7; background:#10151d; max-width:1440px; min-height:100%; padding:32px 40px; font-size:13px; font-variant-numeric:tabular-nums; }
+.wrisk-app .monitor { max-width:1240px; margin:auto; }
+.wrisk-app h1 { font-size:25px; font-weight:600; letter-spacing:-.6px; }
+.wrisk-app h2 { font-weight:600; }
+.wrisk-app .monitor-header { margin-bottom:26px; }
+.wrisk-app .eyebrow { color:var(--muted); font-size:11px; letter-spacing:1.3px; margin-bottom:8px; }
+.wrisk-app .button-primary { background:#b7cdec; color:#142238; border-color:#b7cdec; }
+.wrisk-app .button-primary:hover:not(:disabled) { background:#c8d9ef; color:#142238; }
+.wrisk-app button:focus-visible,.wrisk-app summary:focus-visible,.wrisk-app input:focus-visible { outline:2px solid #b7cdec; outline-offset:3px; }
+.wrisk-app .status-badge { background:#19272a; border:1px solid #2c4744; color:#93c7b8; font-size:11px; }
+.wrisk-app .status-badge.is-neutral { background:#202733; border-color:var(--line); color:var(--muted); }
+.wrisk-app .status-badge.is-error { background:#392729; color:#e0a3a0; border-color:#5d363b; }
+.wrisk-app .monitor-toolbar { border:0; padding:0; margin:14px 0 22px; }
+.wrisk-app .portfolio-tabs { display:flex; gap:28px; border-bottom:1px solid var(--line); margin-bottom:28px; }
+.wrisk-app .portfolio-tabs button { border:0; border-radius:0; padding:0 0 12px; color:var(--muted); background:transparent; font-size:14px; }
+.wrisk-app .portfolio-tabs button[aria-pressed=true] { color:#d5e5fa; border-bottom:2px solid #aac5e9; }
+.wrisk-app .portfolio-hero { display:grid; grid-template-columns:minmax(0,1fr) 260px; gap:28px; padding:10px 0 26px; }
+.wrisk-app .portfolio-total h2 { font-size:clamp(36px,4.2vw,56px); letter-spacing:-2px; line-height:1.2; overflow-wrap:anywhere; }
+.wrisk-app .portfolio-total h2 small { font-size:15px; letter-spacing:0; font-weight:400; }
+.wrisk-app .scope-label { color:#a7b5c7; margin-top:13px; font-size:12px; }
+.wrisk-app .portfolio-total>.muted { font-size:11px; margin-top:9px; }
+.wrisk-app .portfolio-return { border-left:1px solid var(--line); padding-left:34px; display:flex; flex-direction:column; align-items:flex-start; color:var(--muted); }
+.wrisk-app .portfolio-return>strong { font-weight:500; font-size:34px; color:#bdc8d7; line-height:1.4; }
+.wrisk-app .portfolio-return>strong small { font-size:18px; }
+.wrisk-app .portfolio-return>p { font-size:16px; }
+.wrisk-app .portfolio-return .cost-note { margin-top:9px; font-size:11px; }
+.wrisk-app .portfolio-meta { grid-column:1/-1; display:flex; flex-wrap:wrap; gap:10px 28px; font-size:11px; color:var(--muted); border-top:1px solid var(--line); padding-top:18px; }
+.wrisk-app .status-dot.is-on { background:#87b9a8; }
+.wrisk-app .is-history .portfolio-total h2,.wrisk-app .history-label { color:#d0b17a; }
+.wrisk-app .coverage-callout { background:#28251e; border-left:2px solid #b99d65; color:#d1bd99; padding:11px 14px; margin:0 0 22px; font-size:12px; }
+.wrisk-app .portfolio-columns { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(285px,1fr); gap:22px; align-items:start; }
+.wrisk-app .portfolio-card { background:#151c26; border:1px solid var(--line); border-radius:12px; min-width:0; overflow:hidden; }
+.wrisk-app .portfolio-card>.section-heading { padding:22px 22px 12px; margin:0; }
+.wrisk-app .portfolio-card .section-heading>span { color:var(--muted); font-size:11px; }
+.wrisk-app .portfolio-table { width:100%; border-collapse:collapse; margin:0; font-size:12px; white-space:nowrap; }
+.wrisk-app .portfolio-table th { font-weight:400; color:var(--muted); font-size:11px; background:transparent; padding:12px 12px; text-align:right; border-bottom:1px solid var(--line); }
+.wrisk-app .portfolio-table th:first-child { text-align:left; padding-left:22px; }
+.wrisk-app .portfolio-table td { padding:15px 12px; border-bottom:1px solid #232c39; background:transparent; }
+.wrisk-app .portfolio-table td:last-child,.wrisk-app .portfolio-table th:last-child { padding-right:22px; }
+.wrisk-app .portfolio-table td:first-child { padding-left:22px; }
+.wrisk-app .portfolio-table .number { text-align:right; font-family:inherit; }
+.wrisk-app .portfolio-table td small { display:block; font-size:10px; margin-top:4px; }
+.wrisk-app .portfolio-table .asset-button { display:flex; border:0; padding:0; background:transparent; gap:10px; text-align:left; white-space:normal; word-break:break-word; max-width:180px; }
+.wrisk-app .asset-icon { display:flex; align-items:center; justify-content:center; flex:0 0 30px; height:30px; border-radius:50%; background:#293648; color:#c1d3e9; font-weight:600; font-size:14px; }
+.wrisk-app .asset-button strong { font-size:12px; font-weight:600; }
+.wrisk-app .asset-button small { color:var(--muted); margin-top:1px; }
+.wrisk-app .card-footnote { padding:14px 22px; color:#8999ae; font-size:10px; line-height:1.6; }
+.wrisk-app .dust { border:0; border-radius:0; padding:0; margin:0; background:transparent; }
+.wrisk-app .dust summary { font-size:11px; color:#a9b7c9; padding:16px 22px; cursor:pointer; }
+.wrisk-app .dust summary>span { display:block; font-size:10px; color:#8292a8; margin-top:3px; }
+.wrisk-app .allocation>.muted { padding:0 22px; font-size:11px; }
+.wrisk-app .allocation-list { padding:8px 22px 0; }
+.wrisk-app .allocation-row { display:grid; grid-template-columns:1fr 56px; gap:9px; width:100%; padding:16px 0; border:0; border-radius:0; border-bottom:1px solid #232c39; background:transparent; text-align:left; }
+.wrisk-app .allocation-row:hover:not(:disabled) { background:transparent; border-color:#3b4e65; }
+.wrisk-app .allocation-name { grid-column:1/-1; display:flex; align-items:center; gap:8px; min-width:0; }
+.wrisk-app .allocation-name strong { font-size:12px; font-weight:500; overflow-wrap:anywhere; }
+.wrisk-app .allocation-name>span { margin-left:auto; text-align:right; font-size:12px; }
+.wrisk-app .allocation-name small { font-size:10px; }
+.wrisk-app .allocation-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.wrisk-app .allocation-track { height:4px; background:#26303e; border-radius:2px; align-self:center; overflow:hidden; }
+.wrisk-app .allocation-track i { display:block; height:100%; border-radius:2px; }
+.wrisk-app .tone-0 { background:#8aa8ca; } .wrisk-app .tone-1 { background:#79a99c; } .wrisk-app .tone-2 { background:#a698bd; } .wrisk-app .tone-3 { background:#b29e7d; } .wrisk-app .tone-4 { background:#73869d; }
+.wrisk-app .allocation-percent { text-align:right; font-size:11px; color:#a8b7c9; }
+.wrisk-app .allocation-empty { padding:50px 22px; color:var(--muted); text-align:center; line-height:2; }
+.wrisk-app .risk-page { padding-bottom:22px; }
+.wrisk-app .risk-page>.coverage-callout { margin:10px 22px 24px; }
+.wrisk-app .risk-metrics { display:grid; grid-template-columns:1fr 1fr; gap:30px; padding:0 22px; }
+.wrisk-app .risk-metrics article { display:flex; flex-direction:column; gap:12px; }
+.wrisk-app .risk-metrics strong { font-size:28px; font-weight:500; }
+.wrisk-app .risk-metrics strong small { font-size:12px; }
+.wrisk-app .risk-metrics p { color:var(--muted); font-size:12px; }
+.wrisk-app .monitor-footer { margin-top:22px; font-size:11px; color:var(--muted); flex-wrap:wrap; gap:10px; }
+.wrisk-app .build-label { color:#748398; font-size:10px; }
+.wrisk-app .connection-notice { background:#19232f; border:1px solid #2b3d50; padding:14px 18px; margin:0 0 16px; border-radius:8px; font-size:12px; }
+.wrisk-app .connection-notice code { font-size:10px; color:var(--muted); overflow-wrap:anywhere; }
+.wrisk-app .notice-error { background:#2b2026; border-color:#513038; }
+.wrisk-app .notice-warning { background:#29251e; border-color:#55472f; }
+.wrisk-app .connection-settings { margin-top:24px; background:#151c26; border:1px solid var(--line); }
+.wrisk-app .connection-settings>summary { padding:14px 18px; font-size:12px; color:var(--muted); }
+.wrisk-app input:not([type=checkbox]),.wrisk-app textarea { background:#101721; color:#e6edf7; border:1px solid #354255; }
+.wrisk-app .asset-detail { color:#e6edf7; background:#18202c; border:1px solid #3a495f; border-radius:14px; width:min(520px,calc(100vw - 32px)); max-height:85vh; padding:28px; box-shadow:0 24px 80px #0008; }
+.wrisk-app .asset-detail::backdrop { background:#040910b8; }
+.wrisk-app .asset-detail h2 { font-size:24px; overflow-wrap:anywhere; }
+.wrisk-app .asset-detail dl { margin:24px 0; }
+.wrisk-app .asset-detail dl>div { display:flex; gap:22px; justify-content:space-between; padding:13px 0; border-bottom:1px solid var(--line); }
+.wrisk-app .asset-detail dt { color:var(--muted); font-size:12px; flex-shrink:0; }
+.wrisk-app .asset-detail dd { text-align:right; margin:0; font-size:13px; overflow-wrap:anywhere; }
+.wrisk-app .asset-detail dd small { display:block; font-size:10px; margin-top:4px; }
+.wrisk-app .asset-detail>div>.muted { font-size:11px; }
+@media(max-width:1050px) { .wrisk-app { padding:24px; } .wrisk-app .portfolio-columns { grid-template-columns:1fr; } .wrisk-app .allocation-list { display:grid; grid-template-columns:1fr 1fr; column-gap:28px; } }
+@media(max-width:620px) { .wrisk-app { padding:20px 14px; } .wrisk-app .monitor-header { margin-bottom:18px; } .wrisk-app .portfolio-hero { grid-template-columns:1fr; gap:20px; } .wrisk-app .portfolio-return { border-left:0; border-top:1px solid var(--line); padding:18px 0 0; } .wrisk-app .portfolio-total h2 { font-size:40px; } .wrisk-app .portfolio-return>strong { font-size:28px; } .wrisk-app .portfolio-meta { gap:8px; } .wrisk-app .portfolio-table th,.wrisk-app .portfolio-table td { padding:12px 8px; } .wrisk-app .portfolio-table td:first-child,.wrisk-app .portfolio-table th:first-child { padding-left:14px; } .wrisk-app .portfolio-table td:last-child,.wrisk-app .portfolio-table th:last-child { padding-right:14px; } .wrisk-app .asset-icon { display:none; } .wrisk-app .allocation-list { display:block; } .wrisk-app .risk-metrics { grid-template-columns:1fr; } .wrisk-app .monitor-toolbar { gap:12px; } .wrisk-app .portfolio-table { font-size:11px; } }
+
+.wrisk-app .quote-health { font-size:11px; color:#91aa9f; margin:0 0 14px; }

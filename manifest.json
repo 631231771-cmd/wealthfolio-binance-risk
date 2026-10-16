@@ -1,8 +1,8 @@
 {
   "id": "wealthfolio-binance-risk",
-  "name": "币安资产监控",
-  "version": "0.1.14",
-  "description": "独立小额Spot直接只读同步；本人确认日志剩余风险，自动刷新仅页面可见时运行。",
+  "name": "币安资产总览",
+  "version": "0.2.0",
+  "description": "Binance Spot只读资产总览、独立公开行情刷新及明确历史估值；成本未核实不计算盈亏。",
   "author": "个人项目",
   "main": "dist/addon.js",
   "sdkVersion": "3.9.0",
@@ -19,7 +19,7 @@
         {
           "id": "wealthfolio-binance-risk",
           "route": "wealthfolio-binance-risk",
-          "label": "币安资产监控",
+          "label": "币安资产总览",
           "icon": "squares-four",
           "order": 100
         }

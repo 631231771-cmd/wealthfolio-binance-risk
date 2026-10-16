@@ -6,6 +6,7 @@ import { PublicMarketError, SpotQuoteReader, mergeDynamicPublicSpotPrices, PUBLI
 import { assetKey, calculateRisk, type PortfolioState } from './domain';
 
 export const DIRECT_INTERVAL=300_000, DIRECT_TTL=360_000;
+export const QUOTE_INTERVAL=60_000, QUOTE_TTL=120_000;
 const blocked=['enableWithdrawals','enableInternalTransfer','enableMargin','enableFutures','permitsUniversalTransfer','enableVanillaOptions','enableFixApiTrade','enableSpotAndMarginTrading','enablePortfolioMarginTrading'];
 export const READ_ONLY_FIELDS=['enableReading','ipRestrict',...blocked,'enableFixReadOnly'];
 export type PermissionReason='READING_DISABLED'|'EXTRA_PERMISSION'|'PERMISSION_FIELDS_INCOMPLETE';
@@ -45,6 +46,8 @@ export class DirectSpot {
   private uid=''; private connected=false; private visible=false; private failures=0;
   private due=0; private auto=false; private success=false;
   private cooldownUntil=0;
+  private quoteDue=0; private quoteFailures=0;
+  private reference: {state:PortfolioState;report:ReturnType<typeof calculateRisk>;at:string}|null=null;
   private diagnostic:DirectDiagnostic={stage:'idle',code:'NOT_CONNECTED'};
   private timeObservations:TimeObservation[]=[];
   private publicObservations:TimeObservation[]=[];
@@ -52,20 +55,23 @@ export class DirectSpot {
   message='未连接真实账户；首次请求必须本人确认';
   constructor(private credentials:BinanceCredentials,private network:Pick<NetworkAPI,'request'>,private quotes:SpotQuoteReader,private now=Date.now,private timeout=15_000,private monotonic=()=>performance.now()){}
   getState(){return structuredClone(this.state);}
+  getReference(){return structuredClone(this.reference);}
+  getHistoricalQuotes(){return this.quotes.getHistoricalQuotes();}
   getDiagnostic(){return structuredClone(this.diagnostic);}
   getTimeObservations(){return structuredClone(this.timeObservations);}
   getPublicObservations(){return structuredClone(this.publicObservations);}
-  private retry():DirectRetry {
+  private retry(publicQuote=false):DirectRetry {
     const remaining=Math.max(this.cooldownUntil,this.quotes.getCooldownUntil())-this.now();
     if(remaining>0)return {canRetry:false,reason:'exchange-limit',waitSeconds:Math.ceil(remaining/1000)};
     if(this.busy||this.pending||this.quotes.isBusy())return {canRetry:false,reason:'in-flight',waitSeconds:0};
     if(!this.connected)return {canRetry:false,reason:'confirmation-required',waitSeconds:0};
     if(!this.visible)return {canRetry:false,reason:'page-hidden',waitSeconds:0};
-    if(this.failures&&this.due>this.now())return {canRetry:false,reason:'backoff',waitSeconds:Math.ceil((this.due-this.now())/1000)};
+    const backoff=publicQuote?(this.quoteFailures?this.quoteDue:0):(this.failures?this.due:0);
+    if(backoff>this.now())return {canRetry:false,reason:'backoff',waitSeconds:Math.ceil((backoff-this.now())/1000)};
     return {canRetry:true,reason:'ready',waitSeconds:0};
   }
-  getStatus(){return {connected:this.connected,busy:this.busy||this.pending||this.quotes.isBusy(),auto:this.auto,success:this.success,nextDue:Math.max(this.due,this.cooldownUntil,this.quotes.getCooldownUntil()),visible:this.visible,retry:this.retry()};}
-  setVisible(value:boolean){if(this.visible&&!value){this.epoch++;this.quotes.disconnect();}this.visible=value;}
+  getStatus(){return {connected:this.connected,busy:this.busy||this.pending||this.quotes.isBusy(),auto:this.auto,success:this.success,nextDue:Math.max(this.due,this.cooldownUntil,this.quotes.getCooldownUntil()),quoteDue:Math.max(this.quoteDue,this.cooldownUntil,this.quotes.getCooldownUntil()),quoteRetry:this.retry(true),visible:this.visible,retry:this.retry()};}
+  setVisible(value:boolean){if(this.visible&&!value){this.epoch++;this.quotes.disconnect();}if(!this.visible&&value&&!this.quoteFailures)this.quoteDue=0;this.visible=value;}
   disconnect(){this.epoch++;this.quotes.disconnect();this.connected=false;this.auto=false;this.success=false;this.failures=0;this.due=0;this.invalidate();this.diagnostic={stage:'disconnected',code:'USER_DISCONNECTED'};this.message='已断开；不再发送新请求，在途SDK请求无法撤回，迟到结果不发布';}
   private invalidate(){for(const a of this.state.accounts)this.state.statuses[a.id]={state:'failed',attemptedAt:new Date(this.now()).toISOString(),reason:'真实Spot读取失效；历史数量仅供参考'};}
   authorize(uid:string,ack:{risk:boolean;smallAccount:boolean;readOnlyPage:boolean;aiIsolated:boolean}){
@@ -77,7 +83,15 @@ export class DirectSpot {
     if(value&&(!this.connected||!this.success||!reconciled))throw new Error('先成功查询并由本人对账，才能开启自动刷新');
     this.auto=value;if(value)this.due=Math.max(this.due,this.now()+DIRECT_INTERVAL);
   }
-  async tick(){if(this.auto&&this.retry().canRetry&&this.now()>=this.due)await this.sync();}
+  async tick(){
+    // 一个调度器、全局单飞。余额到期优先；公开行情不读取凭据，也不依赖余额TTL。
+    if(this.auto&&this.retry().canRetry&&this.now()>=this.due){await this.sync();return;}
+    if(this.success&&this.retry(true).canRetry&&this.now()>=this.quoteDue)await this.refreshQuotes();
+  }
+  private rememberValuation(){
+    const value=this.valued();
+    if(value.report.coveredSubtotal!==null&&(value.report.coverage==='complete'||this.reference?.report.coverage!=='complete'))this.reference={...value,at:new Date(this.now()).toISOString()};
+  }
   private async request(req:NetworkRequest,epoch:number,publicOnly=false):Promise<unknown>{
     if(publicOnly&&!(req.method==='GET'&&[PUBLIC_ORIGIN+'/api/v3/time','https://api.binance.com/api/v3/time'].includes(req.url)&&!req.headers&&!req.body))throw new SpotError('invalid');
     if((!this.connected&&!publicOnly)||!this.visible||epoch!==this.epoch)throw new SpotError('disconnected');
@@ -193,6 +207,7 @@ export class DirectSpot {
       this.diagnostic={stage:'complete',code:'OK',...this.lastRequest};
       this.state={schemaVersion:1,accounts:[account],snapshots:{[account.id]:snapshot},statuses:{[account.id]:{state:'ready',attemptedAt:snapshot.asOf}}};
       this.success=true;this.failures=0;this.due=this.now()+DIRECT_INTERVAL;this.message='真实Spot快照已替换；请核对数量、来源和缺口。未写主程序账本';
+      this.quoteDue=0;this.quoteFailures=0;this.rememberValuation();
     }catch(e){
       if(epoch===this.epoch){
         const failedAt=this.diagnostic.stage;
@@ -210,25 +225,29 @@ export class DirectSpot {
     }finally{this.busy=false;}
   }
   async refreshQuotes(){
-    if(!this.success||!this.retry().canRetry||!this.valued().report.currentAccountIds.length)throw new SpotError('busy');
+    if(!this.success||!this.retry(true).canRetry)throw new SpotError('busy');
     this.busy=true;const epoch=this.epoch;this.diagnostic={stage:'quotes',code:'RUNNING'};
     try{
       const state=this.getState(),account=state.accounts[0],snapshot=account?state.snapshots[account.id]:undefined;
       if(!account||!snapshot||snapshot.dataMode!=='external')throw new SpotError('invalid');
       const result=await this.quotes.refreshSpotAssets(snapshot.positions.map(position=>position.asset.code));
       const codes={complete:'QUOTE_COMPLETE',partial:'QUOTE_PARTIAL','request-failed':'QUOTE_REQUEST_FAILED','no-market':'QUOTE_NO_MARKET','no-candidates':'QUOTE_NO_CANDIDATES','budget-limited':'QUOTE_BUDGET_LIMITED'} as const;
-      if(this.connected&&this.visible&&epoch===this.epoch)this.diagnostic={stage:'quotes',code:codes[result.status],quote:result};
+      if(this.connected&&this.visible&&epoch===this.epoch){
+        this.diagnostic={stage:'quotes',code:codes[result.status],quote:result};
+        this.quoteFailures=result.failedRequestCount?this.quoteFailures+1:0;
+        if(result.pricedCount>0||result.status==='no-candidates')this.rememberValuation();
+      }
     }catch(error){
       const code=error instanceof PublicMarketError?({
         network:'QUOTE_REQUEST_FAILED',timeout:'QUOTE_TIMEOUT','rate-limit':'QUOTE_RATE_LIMIT',invalid:'QUOTE_INVALID',disconnected:'QUOTE_DISCONNECTED',busy:'QUOTE_BUSY'
       } as const)[error.code]:'QUOTES_UNAVAILABLE';
-      if(this.connected&&this.visible&&epoch===this.epoch)this.diagnostic={stage:'quotes',code};
-    }finally{this.busy=false;}
+      if(this.connected&&this.visible&&epoch===this.epoch){this.diagnostic={stage:'quotes',code};this.quoteFailures++;}
+    }finally{this.busy=false;this.quoteDue=this.now()+Math.min(QUOTE_INTERVAL*2**Math.min(this.quoteFailures,3),300_000);}
   }
   valued(){
     const now=this.now(),state=this.getState(),a=state.accounts[0];
-    if(a&&state.snapshots[a.id])state.snapshots[a.id]=mergeDynamicPublicSpotPrices(a,state.snapshots[a.id],this.quotes.getSpotQuotes(),now,DIRECT_TTL);
+    if(a&&state.snapshots[a.id])state.snapshots[a.id]=mergeDynamicPublicSpotPrices(a,state.snapshots[a.id],this.quotes.getSpotQuotes(),now,QUOTE_TTL);
     const shocks=Object.fromEntries(Object.values(state.snapshots).flatMap(s=>s.positions.map(p=>[assetKey(p.asset),spotShock(p.asset.code)])));
-    return {state,report:calculateRisk(state,'USDT',[],shocks,{now:new Date(now).toISOString(),balanceMaxAgeMs:DIRECT_TTL,priceMaxAgeMs:DIRECT_TTL,fxMaxAgeMs:DIRECT_TTL})};
+    return {state,report:calculateRisk(state,'USDT',[],shocks,{now:new Date(now).toISOString(),balanceMaxAgeMs:DIRECT_TTL,priceMaxAgeMs:QUOTE_TTL,fxMaxAgeMs:DIRECT_TTL})};
   }
 }

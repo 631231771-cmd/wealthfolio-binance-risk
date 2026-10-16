@@ -30,13 +30,13 @@ export function parseUsdtMarkets(data:unknown, expectedAssets?:string[]):Map<str
 // 构造公开 GET，不发送。限于本次所需 symbols，不能退化成获取所有 ticker。
 export function publicTickerRequest(symbols:string[]):NetworkRequest {
   if(!symbols.length || symbols.length>100 || symbols.some(s=>!symbolCode(s)) || new Set(symbols).size!==symbols.length)throw invalid();
-  const params=new URLSearchParams(symbols.length===1?{symbol:symbols[0]}:{symbols:JSON.stringify(symbols)});
+  const params=new URLSearchParams(symbols.length===1?{symbol:symbols[0],symbolStatus:'TRADING'}:{symbols:JSON.stringify(symbols),symbolStatus:'TRADING'});
   return {method:'GET',url:`https://api.binance.com/api/v3/ticker/price?${params}`};
 }
 
 export function publicExchangeInfoRequest(symbols:string[]):NetworkRequest {
   if(!symbols.length || symbols.length>100 || symbols.some(s=>!symbolCode(s)) || new Set(symbols).size!==symbols.length)throw invalid();
-  return {method:'GET',url:`https://api.binance.com/api/v3/exchangeInfo?${new URLSearchParams({symbols:JSON.stringify(symbols)})}`};
+  return {method:'GET',url:`https://api.binance.com/api/v3/exchangeInfo?${new URLSearchParams({symbols:JSON.stringify(symbols),showPermissionSets:'false'})}`};
 }
 
 // ticker 无行情生成时间：receivedAt 是采集时间，不伪装成交易所成交时间。
@@ -60,11 +60,13 @@ export function parseTickerPricesPartial(data:unknown, expected:string[], receiv
   if(!Number.isFinite(Date.parse(receivedAt)) || !expected.length || expected.length>100 || expected.some(s=>!symbolCode(s)) || new Set(expected).size!==expected.length)throw invalid();
   const rows=Array.isArray(data)?data:[data];
   if(rows.length>expected.length)throw invalid();
-  const prices=new Map<string,Price>(), duplicate=new Set<string>();
+  const prices=new Map<string,Price>(), seen=new Set<string>();
   for(const row of rows) {
-    if(!row || !symbolCode(row.symbol) || !expected.includes(row.symbol) || typeof row.price!=='string' || row.price.length>80)continue;
-    if(prices.has(row.symbol)){prices.delete(row.symbol);duplicate.add(row.symbol);continue;}
-    if(duplicate.has(row.symbol))continue;
+    if(!row || !symbolCode(row.symbol) || !expected.includes(row.symbol))continue;
+    // 重复身份本身就是歧义，即使其中一行价格无效也不能保留另一行。
+    if(seen.has(row.symbol)){prices.delete(row.symbol);continue;}
+    seen.add(row.symbol);
+    if(typeof row.price!=='string' || row.price.length>80)continue;
     try {const number=nonnegative(row.price);if(number.isZero())continue;prices.set(row.symbol,{value:number.toFixed(),currency:'USDT',asOf:receivedAt,source:'external:ticker/price（采集时间，非成交时间）'});}catch{/* 该币缺价；不污染同批其他报价 */}
   }
   return prices;

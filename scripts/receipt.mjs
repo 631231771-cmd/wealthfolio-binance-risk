@@ -1,5 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+import {sourceFingerprint} from './source-fingerprint.mjs';
 
 const root=new URL('../',import.meta.url);
 const manifest=JSON.parse(readFileSync(new URL('manifest.json',root),'utf8'));
@@ -8,6 +10,9 @@ const hash=path=>createHash('sha256').update(readFileSync(new URL(path,root))).d
 const receipt={
   createdAt:new Date().toISOString(),
   project:manifest.id, version:manifest.version,
+  sourceFingerprint:sourceFingerprint(),
+  sourceCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),
+  trackedChanges:execFileSync('git',['status','--porcelain','--untracked-files=no'],{encoding:'utf8'}).trim().length>0,
   wealthfolioTarget:'3.10.0', upstreamCommit:'f9643209e7cafcaf133d5a8fbe1ef2fa4fd7fc04', sdk:'3.9.0',
   node:process.version,
   zip,

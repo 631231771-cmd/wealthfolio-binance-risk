@@ -7,15 +7,20 @@ import { emptyState, syncedFixture, DEMO_IDS, FIXTURE_TIME } from '../src/fixtur
 import { SpotOfflineReader, spotRisk } from '../src/spot.ts';
 import { spotFixtureTransport } from '../src/spot-fixture.ts';
 import { DummyCredentials } from '../src/credentials.ts';
+import {sourceFingerprint} from './source-fingerprint.mjs';
 
 const manifest=JSON.parse(readFileSync(new URL('../manifest.json',import.meta.url),'utf8'));
-const {default:enable,SpotHoldingsTable}=await import('../dist/addon.js');
+const {default:enable,SpotHoldingsTable,DeveloperWorkbench}=await import('../dist/addon.js');
 let route;
 await enable({onDisable:()=>{},api:{storage:{get:async()=>null},toast:{error:()=>{}}},router:{add:value=>{route=value;}}});
 assert.equal(route.id,manifest.contributes.routes[0].id);
 assert.equal(route.path,`/addons/${manifest.id}`);
-const html=renderToStaticMarkup(createElement(route.component));
-assert.equal((html.match(/type="password"/g)??[]).length,2);
+const home=renderToStaticMarkup(createElement(route.component));
+assert.ok(!home.includes("导入本地余额快照"));assert.ok(!home.includes("模拟同步"));assert.ok(home.includes("资产总览"));
+const devContext={api:{secrets:{},network:{},storage:{}}};
+const html=renderToStaticMarkup(createElement(DeveloperWorkbench,{ctx:devContext,initial:emptyState()}));
+assert.equal((home.match(/type="password"/g)??[]).length,2);
+assert.ok(home.includes(manifest.version));assert.ok(home.includes(sourceFingerprint().slice(0,8)));
 assert.ok(html.includes('本快照入口不接收Key或Secret'));
 assert.ok(html.includes('导入本地余额快照'));
 assert.ok(html.includes('Binance Stocks'));assert.ok(html.includes('unsupported'));
@@ -35,7 +40,7 @@ const cases=[
 ];
 for (const [state,subtotal,stress,time] of cases) {
   await enable({onDisable:()=>{},api:{storage:{get:async()=>JSON.stringify(state)},toast:{error:()=>assert.fail('有效样例不能恢复失败')}},router:{add:value=>{route=value;}}});
-  const rendered=renderToStaticMarkup(createElement(route.component));
+  const rendered=renderToStaticMarkup(createElement(DeveloperWorkbench,{ctx:devContext,initial:state}));
   assert.ok(rendered.includes(`当前有效且有价格的资产小计：<strong>${subtotal}</strong>`));
   assert.ok(rendered.includes(`当前有效已覆盖范围损失：${stress}`));
   assert.ok(rendered.includes(`快照时间：${time}`));
