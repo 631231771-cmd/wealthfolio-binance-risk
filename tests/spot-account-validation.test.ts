@@ -6,7 +6,7 @@ import {validateSnapshot,SnapshotValidationError} from '../src/domain';
 import {describeDiagnostic} from '../src/direct-panel';
 import {DirectSpot} from '../src/direct-spot';
 import {BinanceCredentials} from '../src/credentials';
-import {PublicMarketReader} from '../src/public-market';
+import {SpotQuoteReader} from '../src/public-market';
 
 const TIME='2026-10-15T00:00:00.000Z',T=Date.parse(TIME);
 const account=(rows:unknown[]=[])=>({uid:7,accountType:'SPOT',balances:rows});
@@ -17,7 +17,7 @@ async function runBalance(body:unknown,transport?:Partial<NetworkResponse>,nativ
  const permissions={enableReading:true,ipRestrict:false,enableWithdrawals:false,enableInternalTransfer:false,enableMargin:false,enableFutures:false,permitsUniversalTransfer:false,enableVanillaOptions:false,enableFixApiTrade:false,enableSpotAndMarginTrading:false,enablePortfolioMarginTrading:false};
  let wall=T,mono=0;const calls:string[]=[];
  const network:Pick<NetworkAPI,'request'>={request:async req=>{const path=new URL(req.url).pathname;calls.push(path);wall+=100;mono+=100;if(path==='/api/v3/account'&&nativeError!==undefined)throw nativeError;let data:unknown=path.endsWith('/time')?{serverTime:wall-50}:path.endsWith('apiRestrictions')?permissions:body;return {status:200,headers:{},body:JSON.stringify(data),...(path==='/api/v3/account'?transport:{})} satisfies NetworkResponse;}};
- const reader=new DirectSpot(credentials,network,new PublicMarketReader(network,()=>wall),()=>wall,100,()=>mono);
+ const reader=new DirectSpot(credentials,network,new SpotQuoteReader(network,()=>wall),()=>wall,100,()=>mono);
  reader.setVisible(true);reader.authorize('7',{risk:true,smallAccount:true,readOnlyPage:true,aiIsolated:true});await reader.sync();return {reader,calls};
 }
 test('虚构UTF8资产的零余额不能误拒绝其他有效资产，非零数量原样保留',()=>{

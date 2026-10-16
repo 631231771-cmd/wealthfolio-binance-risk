@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import type { NetworkRequest, NetworkResponse } from '@wealthfolio/addon-sdk';
-import { PublicMarketReader, PublicMarketError, PUBLIC_ORIGIN, mergePublicSpotPrices, publicMarketRequest, publicMarketRisk } from '../src/public-market';
+import { PublicMarketReader, SpotQuoteReader, PublicMarketError, PUBLIC_ORIGIN, mergeDynamicPublicSpotPrices, mergePublicSpotPrices, publicMarketRequest, publicMarketRisk } from '../src/public-market';
 import { multiExchangeInfo, MULTI_PRICES } from '../src/spot-fixture';
 import { spotSnapshot, spotRisk } from '../src/spot';
 const NOW=Date.parse('2026-10-14T00:00:00Z');
@@ -26,7 +26,7 @@ function fixture() {
 }
 
 test('公开构造固定HTTPS主机/三个GET；不支持私人路径、URL或认证参数',()=>{
-  for(const req of [publicMarketRequest('time'),publicMarketRequest('exchangeInfo'),publicMarketRequest('price',['BTCUSDT','ETHUSDT'])]) {
+  for(const req of [publicMarketRequest('time'),publicMarketRequest('exchangeInfo'),publicMarketRequest('exchangeInfo',['BTCUSDT','ETHUSDT']),publicMarketRequest('price',['BTCUSDT','ETHUSDT'])]) {
     assert.equal(new URL(req.url).origin,PUBLIC_ORIGIN);assert.equal(req.method,'GET');
     assert.deepEqual(Object.keys(req).sort(),['method','timeoutSecs','url']);
     assert.ok(!/signature|APIKEY|recvWindow|timestamp|account/.test(req.url));
@@ -126,4 +126,82 @@ test('SDK无取消API时超时仍阻止重叠请求，迟到结果不成为当�
   const reader=new PublicMarketReader({request:()=>{count++;return new Promise(r=>{resolve=r;});}},()=>NOW,5);
   await assert.rejects(reader.refresh(),/超时/);await assert.rejects(reader.refresh(),/尚未结束/);assert.equal(count,1);
   resolve(response({serverTime:NOW}));await new Promise(r=>setTimeout(r,0));assert.equal(publicMarketRisk(reader.getState(),NOW).coveredSubtotal,null);
+});
+
+test('真实Spot九项虚构余额按动态资产代码取价，稳定币需明确报价，UTF-8与无市场资产保留缺价',async()=>{
+ const assets=['BTC','ETH','BNB','LINK','XRP','USDC','币','NOPAIR','USDT'];
+ const rows=[['BTC','50000'],['ETH','2500'],['BNB','500'],['LINK','15'],['USDC','1.002']].map(([baseAsset])=>({symbol:`${baseAsset}USDT`,baseAsset,quoteAsset:'USDT',status:'TRADING',isSpotTradingAllowed:true}));
+ rows.push({symbol:'XRPUSDT',baseAsset:'XRP',quoteAsset:'USDT',status:'BREAK',isSpotTradingAllowed:true});
+ const calls:NetworkRequest[]=[];
+ const reader=new SpotQuoteReader({request:async req=>{
+  calls.push(req);const url=new URL(req.url);assert.equal(url.origin,PUBLIC_ORIGIN);assert.equal(req.method,'GET');assert.equal(req.headers,undefined);
+  if(url.pathname.endsWith('/exchangeInfo'))return response({symbols:rows});
+  const symbol=url.searchParams.get('symbol');const symbols=symbol?[symbol]:JSON.parse(url.searchParams.get('symbols')??'[]');
+  return response(symbols.map((s:string)=>({symbol:s,price:({'BTCUSDT':'50000','ETHUSDT':'2500','BNBUSDT':'500','LINKUSDT':'15','USDCUSDT':'1.002'} as Record<string,string>)[s]})).filter((x:any)=>x.price));
+ }} ,()=>NOW);
+ await reader.refreshSpotAssets(assets);
+ const at=new Date(NOW).toISOString();
+ const parsed=spotSnapshot({uid:42,accountType:'SPOT',balances:assets.map((asset,i)=>({asset,free:['0.1','1','2','10','100','20','3','4','10'][i],locked:'0'}))},'external',at,at);
+ const quoted=mergeDynamicPublicSpotPrices(parsed.account,parsed.snapshot,reader.getSpotQuotes(),NOW);
+ const values=quoted.positions.map(p=>[p.asset.code,p.quantity,p.price?.value]);
+ assert.deepEqual(values,[['BTC','0.1','50000'],['ETH','1','2500'],['BNB','2','500'],['LINK','10','15'],['XRP','100',undefined],['USDC','20','1.002'],['币','3',undefined],['NOPAIR','4',undefined],['USDT','10','1']]);
+ const state={schemaVersion:1 as const,accounts:[parsed.account],snapshots:{[parsed.account.id]:quoted},statuses:{[parsed.account.id]:{state:'ready' as const,attemptedAt:at}}};
+ const report=spotRisk(state,NOW);assert.equal(report.coveredSubtotal,'8680.04000000');assert.equal(report.coverage,'partial');assert.equal(report.unpricedPositionCount,3);
+ assert.equal(quoted.dataMode,'external');assert.equal(quoted.positions.reduce((sum,p)=>sum+Number(p.quantity),0),150.1);
+ assert.ok(!calls.some(req=>/account|signature|apiRestrictions/.test(new URL(req.url).pathname)));
+ assert.ok(calls.every(req=>req.url.includes('symbols=')));
+});
+
+test('行情刷新对单个退市 -1121 逐项隔离，其他币报价仍保留',async()=>{
+ let tickerCalls=0;
+ const reader=new SpotQuoteReader({request:async req=>{
+  const url=new URL(req.url);
+  if(url.pathname.endsWith('/exchangeInfo'))return response({symbols:['BTC','ETH','BNB'].map(baseAsset=>({symbol:baseAsset+'USDT',baseAsset,quoteAsset:'USDT',status:'TRADING',isSpotTradingAllowed:true}))});
+  tickerCalls++;
+  const symbols=url.searchParams.get('symbol')?[url.searchParams.get('symbol')!]:JSON.parse(url.searchParams.get('symbols')!);
+  if(symbols.includes('ETHUSDT')&&symbols.length>1)return response({code:-1121,msg:'ignored'},400);
+  if(symbols[0]==='ETHUSDT')return response({code:-1121,msg:'ignored'},400);
+  return response(symbols.map((symbol:string)=>({symbol,price:symbol==='BTCUSDT'?'50000':'500'})));
+ }},()=>NOW);
+ const quotes=await reader.refreshSpotAssets(['BTC','ETH','BNB']);
+ assert.equal(quotes.get('BTC')?.value,'50000');assert.equal(quotes.get('BNB')?.value,'500');assert.equal(quotes.has('ETH'),false);assert.equal(tickerCalls,4);
+});
+
+test('exchangeInfo批次的单个无效symbol -1121 也逐项隔离',async()=>{
+ const calls:string[]=[];
+ const reader=new SpotQuoteReader({request:async req=>{
+  const url=new URL(req.url);calls.push(`${url.pathname}:${url.searchParams.get('symbol')??url.searchParams.get('symbols')}`);
+  if(url.pathname.endsWith('/exchangeInfo')){
+   const symbols=url.searchParams.get('symbol')?[url.searchParams.get('symbol')!]:JSON.parse(url.searchParams.get('symbols')!);
+   if(symbols.includes('ETHUSDT')&&symbols.length>1)return response({code:-1121,msg:'ignored'},400);
+   if(symbols[0]==='ETHUSDT')return response({code:-1121,msg:'ignored'},400);
+   return response({symbols:symbols.map((symbol:string)=>({symbol,baseAsset:symbol.slice(0,-4),quoteAsset:'USDT',status:'TRADING',isSpotTradingAllowed:true}))});
+  }
+  const symbols=url.searchParams.get('symbol')?[url.searchParams.get('symbol')!]:JSON.parse(url.searchParams.get('symbols')!);
+  return response(symbols.map((symbol:string)=>({symbol,price:symbol==='BTCUSDT'?'50000':'500'})));
+ }},()=>NOW);
+ const quotes=await reader.refreshSpotAssets(['BTC','ETH','BNB']);
+ assert.equal(quotes.get('BTC')?.value,'50000');assert.equal(quotes.get('BNB')?.value,'500');assert.equal(quotes.has('ETH'),false);
+ assert.equal(calls.filter(call=>call.startsWith('/api/v3/exchangeInfo:')).length,4);
+});
+
+test('动态行情响应超限、错误JSON和限流安全拒绝，冷却不能被刷新绕过',async()=>{
+ for(const mode of ['large','json'] as const){
+  const reader=new SpotQuoteReader({request:async req=>{
+   if(new URL(req.url).pathname.endsWith('/exchangeInfo'))return mode==='large'?{status:200,headers:{},body:' '.repeat(2*1024*1024+1)}:{status:200,headers:{},body:'not-json'};
+   throw new Error('unexpected');
+  }},()=>NOW);
+  await assert.rejects(reader.refreshSpotAssets(['BTC']));assert.equal(reader.getSpotQuotes().size,0);
+ }
+ let count=0;const reader=new SpotQuoteReader({request:async req=>{count++;return new URL(req.url).pathname.endsWith('/exchangeInfo')?response({code:-1003},429,{'Retry-After':'2'}):response({});}},()=>NOW);
+ await assert.rejects(reader.refreshSpotAssets(['BTC']),/限流/);const before=count;await assert.rejects(reader.refreshSpotAssets(['BTC']),/限流/);assert.equal(count,before);
+});
+
+test('SDK在途超时后不继续下一个请求或重叠刷新，迟到响应不发布价格',async()=>{
+ let resolve!:(response:NetworkResponse)=>void,count=0;
+ const reader=new SpotQuoteReader({request:()=>{count++;return new Promise(r=>{resolve=r;});}},()=>NOW,5);
+ await assert.rejects(reader.refreshSpotAssets(['BTC']));assert.equal(count,1);assert.equal(reader.isBusy(),true);
+ await assert.rejects(reader.refreshSpotAssets(['ETH']),/尚未结束/);assert.equal(count,1);
+ resolve(response({symbols:[{symbol:'BTCUSDT',baseAsset:'BTC',quoteAsset:'USDT',status:'TRADING',isSpotTradingAllowed:true}]}));
+ await new Promise(r=>setTimeout(r,0));assert.equal(reader.isBusy(),false);assert.equal(reader.getSpotQuotes().size,0);
 });

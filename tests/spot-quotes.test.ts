@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseUsdtMarkets, publicTickerRequest, parseTickerPrices } from '../src/spot-quotes';
+import { candidateUsdtSymbol, parseUsdtMarkets, publicExchangeInfoRequest, publicTickerRequest, parseTickerPrices, parseTickerPricesPartial } from '../src/spot-quotes';
 import { SpotOfflineReader, createMockTransport, spotRisk } from '../src/spot';
 import { spotFixtureTransport, multiExchangeInfo, type SpotScenario } from '../src/spot-fixture';
 import { DummyCredentials } from '../src/credentials';
@@ -25,6 +25,13 @@ test('多币映射使用明确 base/quote，不猜 symbol 后缀；暂停/非 Sp
   assert.throws(()=>parseUsdtMarkets({symbols:[market('BTC'),market('ETH','BTCUSDT')]}));
   assert.throws(()=>parseUsdtMarkets({symbols:[{symbol:'BTCUSDT',quoteAsset:'USDT'}]}));
 });
+test('资产标识保留合法UTF-8，交易对symbol仍单独使用严格ASCII规则',()=>{
+ assert.equal(candidateUsdtSymbol('币'),null);assert.equal(candidateUsdtSymbol('BTC'),'BTCUSDT');
+ assert.equal(candidateUsdtSymbol('BTC&signature=x'),null);
+ assert.deepEqual([...parseUsdtMarkets({symbols:[]},['币'])],[]);
+ assert.throws(()=>publicTickerRequest(['币USDT']));
+ assert.throws(()=>publicExchangeInfoRequest(['BTCUSDT','BTCUSDT']));
+});
 test('公开行情单币/批量 GET 白名单，参数编码正确，不携带认证或空全市场请求',()=> {
   for(const symbols of [['BTCUSDT'],['BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT']]) {
     const request=publicTickerRequest(symbols), url=new URL(request.url);
@@ -44,6 +51,16 @@ test('报价对象与数组解析、缺行保留缺价；额外字段不保存�
 test('重复/未知/零/负数/非法报价和时间拒绝，不能产生可靠零价格',()=> {
   for(const data of [[{symbol:'BTCUSDT',price:'1'},{symbol:'BTCUSDT',price:'2'}],{symbol:'BTCUSD',price:'1'},{symbol:'BTCUSDT',price:'0'},{symbol:'BTCUSDT',price:'-1'},{symbol:'BTCUSDT',price:'NaN'},{symbol:'BTCUSDT',price:50000},{}])assert.throws(()=>parseTickerPrices(data,['BTCUSDT'],AT,'fixture'));
   assert.throws(()=>parseTickerPrices([],['BTCUSDT'],'bad time','fixture'));
+});
+test('部分 ticker 解析隔离无效/重复行，不污染其他验证成功的报价',()=>{
+ const prices=parseTickerPricesPartial([
+  {symbol:'BTCUSDT',price:'50000'},
+  {symbol:'ETHUSDT',price:'bad'},
+  {symbol:'BNBUSDT',price:'500'},
+  {symbol:'BNBUSDT',price:'501'}
+ ],['BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT'],AT);
+ assert.equal(prices.get('BTCUSDT')?.value,'50000');
+ assert.equal(prices.has('ETHUSDT'),false);assert.equal(prices.has('BNBUSDT'),false);
 });
 test('六币种手算：37100 USDT、非 USDT -20% 损失 6620，占比/HHI；未知分类不虚构股票',async()=> {
   const {r}=await multi(), state=r.getState(), snapshot=Object.values(state.snapshots)[0], report=spotRisk(state,NOW);

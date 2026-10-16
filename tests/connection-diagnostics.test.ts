@@ -4,7 +4,7 @@ import type {NetworkAPI,NetworkRequest,NetworkResponse} from '@wealthfolio/addon
 import {calibrateTime,ClockError} from '../src/spot';
 import {DirectSpot} from '../src/direct-spot';
 import {BinanceCredentials} from '../src/credentials';
-import {PublicMarketReader} from '../src/public-market';
+import {SpotQuoteReader} from '../src/public-market';
 import {describeDiagnostic,describeTimeObservation} from '../src/direct-panel';
 
 const T=Date.parse('2026-10-15T00:00:00Z');
@@ -16,7 +16,7 @@ function clockHarness(handler:(req:NetworkRequest,n:number,advance:(ms:number,wa
  const credentials=new BinanceCredentials({get:async k=>{reads++;return store.get(k)??null;},set:async(k,v)=>{store.set(k,v);},delete:async k=>{store.delete(k);}});
  const advance=(ms:number,wallDelta=ms)=>{mono+=ms;wall+=wallDelta;};
  const network:Pick<NetworkAPI,'request'>={request:async req=>{calls.push(req);return handler(req,calls.length,advance,()=>wall);}};
- const reader=new DirectSpot(credentials,network,new PublicMarketReader(network,()=>wall),()=>wall,timeout,()=>mono);reader.setVisible(true);
+ const reader=new DirectSpot(credentials,network,new SpotQuoteReader(network,()=>wall),()=>wall,timeout,()=>mono);reader.setVisible(true);
  return {reader,calls,credentials,reads:()=>reads};
 }
 test('校时固定四原因，单调耗时与Unix时间分开，旧2000ms/60000ms边界保留',()=>{

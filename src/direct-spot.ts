@@ -2,7 +2,7 @@ import type { NetworkAPI, NetworkRequest } from '@wealthfolio/addon-sdk';
 import { BinanceCredentials } from './credentials';
 import { buildOfflineReadRequest, signPayload } from './binance';
 import { calibrateTime, classifyResponse, spotSnapshot, SpotError, spotShock, ClockError, SpotValidationError, type ClockDetails, type SpotValidationDetails } from './spot';
-import { PublicMarketReader, mergePublicSpotPrices, PUBLIC_ORIGIN } from './public-market';
+import { SpotQuoteReader, mergeDynamicPublicSpotPrices, PUBLIC_ORIGIN } from './public-market';
 import { assetKey, calculateRisk, type PortfolioState } from './domain';
 
 export const DIRECT_INTERVAL=300_000, DIRECT_TTL=360_000;
@@ -50,7 +50,7 @@ export class DirectSpot {
   private publicObservations:TimeObservation[]=[];
   private lastRequest:{elapsedMs:number;httpStatus:number;jsonValid?:boolean}|undefined;
   message='未连接真实账户；首次请求必须本人确认';
-  constructor(private credentials:BinanceCredentials,private network:Pick<NetworkAPI,'request'>,private quotes:PublicMarketReader,private now=Date.now,private timeout=15_000,private monotonic=()=>performance.now()){}
+  constructor(private credentials:BinanceCredentials,private network:Pick<NetworkAPI,'request'>,private quotes:SpotQuoteReader,private now=Date.now,private timeout=15_000,private monotonic=()=>performance.now()){}
   getState(){return structuredClone(this.state);}
   getDiagnostic(){return structuredClone(this.diagnostic);}
   getTimeObservations(){return structuredClone(this.timeObservations);}
@@ -213,7 +213,9 @@ export class DirectSpot {
     if(!this.success||!this.retry().canRetry||!this.valued().report.currentAccountIds.length)throw new SpotError('busy');
     this.busy=true;const epoch=this.epoch;this.diagnostic={stage:'quotes',code:'RUNNING'};
     try{
-      await this.quotes.refresh();
+      const state=this.getState(),account=state.accounts[0],snapshot=account?state.snapshots[account.id]:undefined;
+      if(!account||!snapshot||snapshot.dataMode!=='external')throw new SpotError('invalid');
+      await this.quotes.refreshSpotAssets(snapshot.positions.map(position=>position.asset.code));
       if(this.connected&&this.visible&&epoch===this.epoch)this.diagnostic={stage:'complete',code:'OK'};
     }catch{
       if(this.connected&&this.visible&&epoch===this.epoch)this.diagnostic={stage:'quotes',code:'QUOTES_UNAVAILABLE'};
@@ -221,7 +223,7 @@ export class DirectSpot {
   }
   valued(){
     const now=this.now(),state=this.getState(),a=state.accounts[0];
-    if(a&&state.snapshots[a.id])state.snapshots[a.id]=mergePublicSpotPrices(a,state.snapshots[a.id],this.quotes.getState(),now,DIRECT_TTL);
+    if(a&&state.snapshots[a.id])state.snapshots[a.id]=mergeDynamicPublicSpotPrices(a,state.snapshots[a.id],this.quotes.getSpotQuotes(),now,DIRECT_TTL);
     const shocks=Object.fromEntries(Object.values(state.snapshots).flatMap(s=>s.positions.map(p=>[assetKey(p.asset),spotShock(p.asset.code)])));
     return {state,report:calculateRisk(state,'USDT',[],shocks,{now:new Date(now).toISOString(),balanceMaxAgeMs:DIRECT_TTL,priceMaxAgeMs:DIRECT_TTL,fxMaxAgeMs:DIRECT_TTL})};
   }

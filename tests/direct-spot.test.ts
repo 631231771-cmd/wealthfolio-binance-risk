@@ -3,7 +3,7 @@ import type { NetworkAPI,NetworkResponse } from '@wealthfolio/addon-sdk';
 import assert from 'node:assert/strict';
 import {DirectSpot,assertReadOnly,DIRECT_INTERVAL,DIRECT_TTL,restrictionRequest} from '../src/direct-spot';
 import {BinanceCredentials} from '../src/credentials';
-import {PublicMarketReader} from '../src/public-market';
+import {SpotQuoteReader} from '../src/public-market';
 import {signPayload} from '../src/binance';
 const permissions={enableReading:true,ipRestrict:true,enableWithdrawals:false,enableInternalTransfer:false,enableMargin:false,enableFutures:false,permitsUniversalTransfer:false,enableVanillaOptions:false,enableFixApiTrade:false,enableSpotAndMarginTrading:false,enablePortfolioMarginTrading:false};
 const ack={risk:true,smallAccount:true,readOnlyPage:true,aiIsolated:true};
@@ -30,7 +30,7 @@ async function harness(timeout=100){
   else body=[{symbol:'BTCUSDT',price:'50000'}];
   return {status:200,headers:{},body:JSON.stringify(body)};
  }};
- const quotes=new PublicMarketReader(network,()=>now),reader=new DirectSpot(credentials,network,quotes,()=>now,timeout);
+ const quotes=new SpotQuoteReader(network,()=>now),reader=new DirectSpot(credentials,network,quotes,()=>now,timeout);
  reader.setVisible(true);
  return {reader,calls,credentials,setResponse:(r:NetworkResponse|undefined)=>{privateResponse=r;},setMode:(m:string)=>{mode=m;},advance:(ms:number)=>{now+=ms;},block:(path:string)=>{blockedPath=path;},release:()=>release?.()};
 }
@@ -117,6 +117,14 @@ test('必须本人确认；权限先于余额；真实来源、缺价与重复�
  assert.throws(()=>h.reader.authorize('1',{...ack,risk:false}));h.reader.authorize('1',ack);await h.reader.sync();await h.reader.refreshQuotes();
  assert.ok(h.calls.indexOf('/sapi/v1/account/apiRestrictions')<h.calls.indexOf('/api/v3/account'));
  for(let i=0;i<2;i++){await h.reader.sync();const v=h.reader.valued();assert.equal(v.report.coveredSubtotal,'65.00000000');assert.equal(v.report.stressLoss,'10.00000000');assert.equal(v.report.total,null);assert.equal(v.report.unpricedPositionCount,1);assert.equal(Object.values(v.state.snapshots)[0].dataMode,'external');assert.equal(Object.values(v.state.snapshots)[0].positions.length,3);}
+});
+test('单独更新行情只读取当前余额资产代码，不再请求账户/权限接口或混入模拟数量',async()=>{
+ const h=await harness();h.reader.authorize('1',ack);await h.reader.sync();
+ const privateCount=()=>h.calls.filter(path=>path==='/api/v3/account'||path==='/sapi/v1/account/apiRestrictions').length;
+ const before=privateCount(),balance=h.reader.getState().snapshots[Object.keys(h.reader.getState().snapshots)[0]].positions.map(p=>p.quantity);
+ await h.reader.refreshQuotes();
+ assert.equal(privateCount(),before);assert.deepEqual(h.reader.getState().snapshots[Object.keys(h.reader.getState().snapshots)[0]].positions.map(p=>p.quantity),balance);
+ assert.ok(h.calls.includes('/api/v3/exchangeInfo'));assert.ok(h.calls.includes('/api/v3/ticker/price'));
 });
 test('额外权限/错误UID/缺余额停止，不能降级为成功空资产',async()=>{
  for(const mode of ['trade','uid','missing']){const h=await harness();h.reader.authorize('1',ack);h.setMode(mode);await h.reader.sync();assert.equal(h.reader.getStatus().connected,false);assert.equal(h.reader.valued().report.coveredSubtotal,null);assert.equal(h.reader.getDiagnostic().code,{trade:'READ_ONLY_REJECTED',uid:'UID_MISMATCH',missing:'SPOT_INVALID'}[mode]);if(mode==='trade')assert.ok(!h.calls.includes('/api/v3/account'));}

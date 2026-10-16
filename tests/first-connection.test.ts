@@ -7,7 +7,7 @@ const {renderToStaticMarkup}=createRequire(import.meta.url)('react-dom/server') 
 import type {NetworkRequest,NetworkResponse} from '@wealthfolio/addon-sdk';
 import {BinanceCredentials} from '../src/credentials';
 import {DirectSpot} from '../src/direct-spot';
-import {PublicMarketReader} from '../src/public-market';
+import {SpotQuoteReader} from '../src/public-market';
 import {DirectSpotPanel} from '../src/direct-panel';
 
 // Entire chain uses memory-only fake secrets and a transport substitute; no SDK/network calls.
@@ -37,7 +37,7 @@ async function fixture(samples:(number|'reject')[],account:unknown={uid:7,accoun
     if(u.pathname==='/sapi/v1/account/apiRestrictions')return reply(permission);
     assert.equal(u.pathname,'/api/v3/account');return reply(account);
   }};
-  const reader=new DirectSpot(credentials,network,new PublicMarketReader(network,()=>wall,quoteResponse?5:100),()=>wall,100,()=>mono);
+  const reader=new DirectSpot(credentials,network,new SpotQuoteReader(network,()=>wall,quoteResponse?5:100),()=>wall,100,()=>mono);
   reader.setVisible(true);reader.authorize('7',ack);
   return {reader,calls,credentials};
 }
@@ -60,7 +60,7 @@ test('首次连接：已结束的宿主失败可以有限重试，合格样本�
 });
 
 test('数量连接成功后，独立行情失败不得撤销余额或伪装零；UID/缺余额仍拒绝',async()=>{
-  const h=await fixture([100]);await h.reader.sync();assert.equal(h.reader.getStatus().success,true);
+  const h=await fixture([100],{uid:7,accountType:'SPOT',balances:[{asset:'BTC',free:'0.5',locked:'0'}]});await h.reader.sync();assert.equal(h.reader.getStatus().success,true);
   const before=h.reader.getState();await h.reader.refreshQuotes();assert.deepEqual(h.reader.getState(),before);
   assert.equal(h.reader.getStatus().success,true);assert.equal(h.reader.getDiagnostic().code,'QUOTES_UNAVAILABLE');
   for(const body of [{uid:8,accountType:'SPOT',balances:[]},{uid:7,accountType:'SPOT'}]){
@@ -70,7 +70,7 @@ test('数量连接成功后，独立行情失败不得撤销余额或伪装零�
 
 test('独立行情超时后仍禁止交叉重叠，断开后的迟到限流也保留',async()=>{
   let release!:(value:NetworkResponse)=>void;
-  const h=await fixture([100],undefined,()=>new Promise<NetworkResponse>(resolve=>{release=resolve;}));
+ const h=await fixture([100],{uid:7,accountType:'SPOT',balances:[{asset:'BTC',free:'0.5',locked:'0'}]},()=>new Promise<NetworkResponse>(resolve=>{release=resolve;}));
   await h.reader.sync();await h.reader.refreshQuotes();
   assert.equal(h.reader.getStatus().success,true);assert.equal(h.reader.getStatus().busy,true);
   const count=h.calls.length;await assert.rejects(h.reader.sync());assert.equal(h.calls.length,count);

@@ -8,7 +8,7 @@ import { DirectSpot } from './direct-spot';
 import { DirectSpotPanel } from './direct-panel';
 import { SpotOfflineReader, spotRisk, spotShock, SpotError } from './spot';
 import { spotFixtureTransport, type SpotScenario } from './spot-fixture';
-import { PublicMarketReader, PublicMarketError, publicMarketRisk } from './public-market';
+import { PublicMarketReader, PublicMarketError, SpotQuoteReader, publicMarketRisk } from './public-market';
 import { SpotBridge } from './spot-bridge';
 import './style.css';
 
@@ -160,7 +160,7 @@ function RiskPage({ ctx, initial,direct,realCredentials }: { ctx: AddonContext; 
 const enable: AddonEnableFunction = async ctx => {
   const network={request:(request:Parameters<AddonContext['api']['network']['request']>[0])=>ctx.api.network.request(request)};
   const realCredentials=new BinanceCredentials(ctx.api.secrets);
-  const direct=new DirectSpot(realCredentials,network,new PublicMarketReader(network));
+  const direct=new DirectSpot(realCredentials,network,new SpotQuoteReader(network));
   ctx.onDisable(()=>direct.disconnect());
   let initial = emptyState();
   const saved = await ctx.api.storage.get('fixture-state-v1');
