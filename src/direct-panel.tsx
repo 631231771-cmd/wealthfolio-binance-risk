@@ -6,6 +6,19 @@ import {assetKey,positionKey,nonnegative} from './domain';
 
 const stages:Record<DirectDiagnostic['stage'],string>={idle:'连接准备',credentials:'安全存储',clock:'时间校准',permissions:'只读权限检查',balance:'Spot余额读取',identity:'账户核对',quotes:'公开报价',complete:'同步完成',disconnected:'连接控制'};
 const codes:Record<string,string>={NOT_CONNECTED:'连接币安后显示真实Spot持仓。',RUNNING:'正在处理，请稍候。',OK:'最近一次同步成功。',USER_DISCONNECTED:'你已断开连接，不会再发送新请求。',PAGE_PAUSED:'页面已暂停，返回后按刷新设置继续。',READ_ONLY_REJECTED:'只读权限检查未通过，余额查询已停止。',UID_MISMATCH:'返回账户与预期UID不符，未接纳该账户资产。',QUOTES_UNAVAILABLE:'余额已读取，公开报价暂不可用；缺价资产不计为零。',SPOT_AUTH:'认证未通过，请在连接设置中核对本机凭据和只读权限。',SPOT_FORBIDDEN:'访问受限，连接已停止。',SPOT_SIGNATURE:'签名校验未通过，连接已停止。',SPOT_CLOCK:'时间校准未通过，连接已停止。',SPOT_TIMEOUT:'请求超时，按现有退避规则等待重试。',SPOT_NETWORK:'网络请求失败，历史数量仍保留。',SPOT_RATE_LIMIT:'已被限流，等待冷却后再刷新。',SPOT_INVALID:'响应不完整或格式无效，未作为成功同步。',SPOT_DISCONNECTED:'连接已停止或页面暂停，迟到结果不会发布。',SPOT_BUSY:'已有请求进行中，请稍候。',INVALID_RESPONSE:'未收到有效响应，当前数据不可用。'};
+Object.assign(codes,{
+  QUOTE_COMPLETE:'公开报价更新完成；Spot余额数量未变。',
+  QUOTE_PARTIAL:'公开报价部分可用；未覆盖资产仍保持缺价。',
+  QUOTE_REQUEST_FAILED:'公开行情请求失败；本次没有可用的新报价。',
+  QUOTE_NO_MARKET:'没有可用的USDT现货交易对；无市场报价的资产保留数量且不估值，USDT/USDT仍按1计价。',
+  QUOTE_NO_CANDIDATES:'没有需要查询的USDT现货交易对；USDT/USDT仍按1计价，其他未覆盖资产不计为零。',
+  QUOTE_BUDGET_LIMITED:'公开行情覆盖受请求预算限制；未检查资产保持缺价。',
+  QUOTE_RATE_LIMIT:'公开行情已被限流，停止本轮请求并等待冷却。',
+  QUOTE_TIMEOUT:'公开行情等待超时；在途请求结束前不会重叠重试。',
+  QUOTE_DISCONNECTED:'公开行情读取已断开；迟到报价不会发布。',
+  QUOTE_BUSY:'公开行情已有请求进行中，请稍候。',
+  QUOTE_INVALID:'公开行情响应无效；本轮结果未被视为成功。',
+});
 const permissionText={READING_DISABLED:'未启用读取。',EXTRA_PERMISSION:'检测到额外权限，拒绝继续。',PERMISSION_FIELDS_INCOMPLETE:'权限字段不完整或不是布尔值，无法确认只读。'};
 codes.HOST_REQUEST_FAILED='宿主调用失败；宿主只返回字符串，无法确定TLS、DNS或原生超时。';
 codes.SPOT_TIMEOUT='插件等待计时器超时；宿主在途请求可能尚未结束，暂不重叠重试。';
@@ -33,6 +46,16 @@ export function describeDiagnostic(d:DirectDiagnostic){
     if(typeof d.clock.offsetMs==='number'&&Number.isFinite(d.clock.offsetMs))parts.push(`偏移${d.clock.offsetMs}ms`);
   }
   if(d.code==='READ_ONLY_REJECTED')for(const item of d.permissionFields??[])if(READ_ONLY_FIELDS.includes(item.field)&&(typeof item.value==='boolean'||item.value===null))parts.push(`${item.field}=${item.value===null?'缺失/非布尔':item.value}`);
+  const q=d.quote;
+  if(q&&['complete','partial','request-failed','no-market','no-candidates','budget-limited'].includes(q.status)){
+    const count=(value:unknown)=>Number.isSafeInteger(value)&&Number(value)>=0&&Number(value)<=10_000?Number(value):undefined;
+    const values=[
+      ['候选',q.candidateCount],['已验证市场',q.marketCount],['新报价',q.pricedCount],
+      ['请求失败',q.failedRequestCount],['未覆盖',q.unexaminedCount],['请求数',q.requestCount],['单项回退',q.fallbackRequestCount]
+    ] as const;
+    for(const [label,value] of values){const n=count(value);if(n!==undefined)parts.push(label+n);}
+    if(q.budgetReason&&['request-cap','fallback-cap','candidate-cap'].includes(q.budgetReason))parts.push('覆盖限制'+q.budgetReason);
+  }
   const reason=d.permissionReason&&Object.hasOwn(permissionText,d.permissionReason)?permissionText[d.permissionReason]:undefined;
   return {stage:stages[d.stage]??'连接状态',code:known?d.code:'UNKNOWN',text:known?(d.code==='SPOT_AUTH'&&d.exchangeCode===-2008?'连接资料未通过平台验证，尚未读取持仓。请本人在币安官网核对连接资料；已保存不代表有效。':d.code==='READ_ONLY_REJECTED'&&reason?reason:codes[d.code]):'操作未完成，请在连接设置中核对。',metadata:parts.join(' · ')};
 }

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import type { NetworkRequest, NetworkResponse } from '@wealthfolio/addon-sdk';
-import { PublicMarketReader, SpotQuoteReader, PublicMarketError, PUBLIC_ORIGIN, mergeDynamicPublicSpotPrices, mergePublicSpotPrices, publicMarketRequest, publicMarketRisk } from '../src/public-market';
+import { PublicMarketReader, SpotQuoteReader, PublicMarketError, PUBLIC_ORIGIN, SPOT_QUOTE_MAX_REQUESTS, SPOT_QUOTE_MAX_FALLBACK_REQUESTS, mergeDynamicPublicSpotPrices, mergePublicSpotPrices, publicMarketRequest, publicMarketRisk } from '../src/public-market';
 import { multiExchangeInfo, MULTI_PRICES } from '../src/spot-fixture';
 import { spotSnapshot, spotRisk } from '../src/spot';
 const NOW=Date.parse('2026-10-14T00:00:00Z');
@@ -139,10 +139,11 @@ test('真实Spot九项虚构余额按动态资产代码取价，稳定币需明�
   const symbol=url.searchParams.get('symbol');const symbols=symbol?[symbol]:JSON.parse(url.searchParams.get('symbols')??'[]');
   return response(symbols.map((s:string)=>({symbol:s,price:({'BTCUSDT':'50000','ETHUSDT':'2500','BNBUSDT':'500','LINKUSDT':'15','USDCUSDT':'1.002'} as Record<string,string>)[s]})).filter((x:any)=>x.price));
  }} ,()=>NOW);
- await reader.refreshSpotAssets(assets);
+ const refresh=await reader.refreshSpotAssets(assets);assert.equal(refresh.status,'partial');assert.equal(refresh.candidateCount,7);assert.equal(refresh.pricedCount,5);
+ const spotQuotes=reader.getSpotQuotes();
  const at=new Date(NOW).toISOString();
  const parsed=spotSnapshot({uid:42,accountType:'SPOT',balances:assets.map((asset,i)=>({asset,free:['0.1','1','2','10','100','20','3','4','10'][i],locked:'0'}))},'external',at,at);
- const quoted=mergeDynamicPublicSpotPrices(parsed.account,parsed.snapshot,reader.getSpotQuotes(),NOW);
+ const quoted=mergeDynamicPublicSpotPrices(parsed.account,parsed.snapshot,spotQuotes,NOW);
  const values=quoted.positions.map(p=>[p.asset.code,p.quantity,p.price?.value]);
  assert.deepEqual(values,[['BTC','0.1','50000'],['ETH','1','2500'],['BNB','2','500'],['LINK','10','15'],['XRP','100',undefined],['USDC','20','1.002'],['币','3',undefined],['NOPAIR','4',undefined],['USDT','10','1']]);
  const state={schemaVersion:1 as const,accounts:[parsed.account],snapshots:{[parsed.account.id]:quoted},statuses:{[parsed.account.id]:{state:'ready' as const,attemptedAt:at}}};
@@ -163,8 +164,8 @@ test('行情刷新对单个退市 -1121 逐项隔离，其他币报价仍保留'
   if(symbols[0]==='ETHUSDT')return response({code:-1121,msg:'ignored'},400);
   return response(symbols.map((symbol:string)=>({symbol,price:symbol==='BTCUSDT'?'50000':'500'})));
  }},()=>NOW);
- const quotes=await reader.refreshSpotAssets(['BTC','ETH','BNB']);
- assert.equal(quotes.get('BTC')?.value,'50000');assert.equal(quotes.get('BNB')?.value,'500');assert.equal(quotes.has('ETH'),false);assert.equal(tickerCalls,4);
+ const result=await reader.refreshSpotAssets(['BTC','ETH','BNB']),quotes=reader.getSpotQuotes();
+ assert.equal(result.status,'partial');assert.equal(quotes.get('BTC')?.value,'50000');assert.equal(quotes.get('BNB')?.value,'500');assert.equal(quotes.has('ETH'),false);assert.equal(tickerCalls,4);
 });
 
 test('exchangeInfo批次的单个无效symbol -1121 也逐项隔离',async()=>{
@@ -180,7 +181,8 @@ test('exchangeInfo批次的单个无效symbol -1121 也逐项隔离',async()=>{
   const symbols=url.searchParams.get('symbol')?[url.searchParams.get('symbol')!]:JSON.parse(url.searchParams.get('symbols')!);
   return response(symbols.map((symbol:string)=>({symbol,price:symbol==='BTCUSDT'?'50000':'500'})));
  }},()=>NOW);
- const quotes=await reader.refreshSpotAssets(['BTC','ETH','BNB']);
+ const result=await reader.refreshSpotAssets(['BTC','ETH','BNB']),quotes=reader.getSpotQuotes();
+ assert.equal(result.status,'partial');
  assert.equal(quotes.get('BTC')?.value,'50000');assert.equal(quotes.get('BNB')?.value,'500');assert.equal(quotes.has('ETH'),false);
  assert.equal(calls.filter(call=>call.startsWith('/api/v3/exchangeInfo:')).length,4);
 });
@@ -191,7 +193,7 @@ test('动态行情响应超限、错误JSON和限流安全拒绝，冷却不能�
    if(new URL(req.url).pathname.endsWith('/exchangeInfo'))return mode==='large'?{status:200,headers:{},body:' '.repeat(2*1024*1024+1)}:{status:200,headers:{},body:'not-json'};
    throw new Error('unexpected');
   }},()=>NOW);
-  await assert.rejects(reader.refreshSpotAssets(['BTC']));assert.equal(reader.getSpotQuotes().size,0);
+  const result=await reader.refreshSpotAssets(['BTC']);assert.equal(result.status,'request-failed');assert.equal(result.failedRequestCount,1);assert.equal(reader.getSpotQuotes().size,0);
  }
  let count=0;const reader=new SpotQuoteReader({request:async req=>{count++;return new URL(req.url).pathname.endsWith('/exchangeInfo')?response({code:-1003},429,{'Retry-After':'2'}):response({});}},()=>NOW);
  await assert.rejects(reader.refreshSpotAssets(['BTC']),/限流/);const before=count;await assert.rejects(reader.refreshSpotAssets(['BTC']),/限流/);assert.equal(count,before);
@@ -204,4 +206,164 @@ test('SDK在途超时后不继续下一个请求或重叠刷新，迟到响应�
  await assert.rejects(reader.refreshSpotAssets(['ETH']),/尚未结束/);assert.equal(count,1);
  resolve(response({symbols:[{symbol:'BTCUSDT',baseAsset:'BTC',quoteAsset:'USDT',status:'TRADING',isSpotTradingAllowed:true}]}));
  await new Promise(r=>setTimeout(r,0));assert.equal(reader.isBusy(),false);assert.equal(reader.getSpotQuotes().size,0);
+});
+
+const requestedSymbols=(request:NetworkRequest):string[]=>{
+ const url=new URL(request.url),one=url.searchParams.get('symbol');
+ return one?[one]:JSON.parse(url.searchParams.get('symbols')??'[]');
+};
+const marketRow=(baseAsset:string)=>({symbol:baseAsset+'USDT',baseAsset,quoteAsset:'USDT',status:'TRADING',isSpotTradingAllowed:true});
+
+test('exchangeInfo成功而ticker返回503时报告请求失败且不发布报价',async()=>{
+ let calls=0;
+ const reader=new SpotQuoteReader({request:async request=>{
+  calls++;const path=new URL(request.url).pathname;
+  return path.endsWith('/exchangeInfo')?response({symbols:[marketRow('BTC')]}):response({error:'fixture'},503);
+ }},()=>NOW);
+ const result=await reader.refreshSpotAssets(['BTC']);
+ assert.equal(result.status,'request-failed');assert.equal(result.failedRequestCount,1);assert.equal(result.marketCount,1);
+ assert.equal(result.pricedCount,0);assert.equal(reader.getSpotQuotes().size,0);assert.equal(calls,2);
+});
+
+test('多批报价一批成功一批503时保留新报价并标记部分成功',async()=>{
+ const assets=Array.from({length:21},(_,i)=>'ASSET'+String(i).padStart(3,'0'));let ticker=0;
+ const reader=new SpotQuoteReader({request:async request=>{
+  const url=new URL(request.url),symbols=requestedSymbols(request);
+  if(url.pathname.endsWith('/exchangeInfo'))return response({symbols:symbols.map(s=>marketRow(s.slice(0,-4)))});
+  ticker++;return ticker===2?response({error:'fixture'},503):response(symbols.map(symbol=>({symbol,price:'2.5'})));
+ }},()=>NOW);
+ const result=await reader.refreshSpotAssets(assets);
+ assert.equal(result.status,'partial');assert.equal(result.marketCount,21);assert.equal(result.pricedCount,20);
+ assert.equal(result.failedRequestCount,1);assert.equal(reader.getSpotQuotes().get(assets[0])?.value,'2.5');
+ assert.equal(reader.getSpotQuotes().has(assets[20]),false);assert.equal(result.requestCount,4);
+});
+
+test('所有市场请求失败不得被误报为无有效市场',async()=>{
+ let calls=0;
+ const reader=new SpotQuoteReader({request:async()=>{calls++;return response({error:'fixture'},503);}},()=>NOW);
+ const result=await reader.refreshSpotAssets(['BTC','ETH']);
+ assert.equal(result.status,'request-failed');assert.equal(result.failedRequestCount,1);
+ assert.equal(result.marketCount,0);assert.equal(calls,1);
+});
+
+test('exchangeInfo正常返回空市场才报告无有效市场',async()=>{
+ let calls=0;
+ const reader=new SpotQuoteReader({request:async()=>{calls++;return response({symbols:[]});}},()=>NOW);
+ const result=await reader.refreshSpotAssets(['BTC','ETH']);
+ assert.equal(result.status,'no-market');assert.equal(result.candidateCount,2);
+ assert.equal(result.failedRequestCount,0);assert.equal(calls,1);
+});
+
+test('仅USDT或不能生成候选交易对的资产不发请求',async()=>{
+ let calls=0;
+ const reader=new SpotQuoteReader({request:async()=>{calls++;return response({});}},()=>NOW);
+ const result=await reader.refreshSpotAssets(['USDT','币']);
+ assert.equal(result.status,'no-candidates');assert.equal(result.candidateCount,0);
+ assert.equal(result.requestCount,0);assert.equal(calls,0);
+});
+
+test('大量-1121隔离回退共享整体预算并显式报告剩余未覆盖',async()=>{
+ const assets=Array.from({length:100},(_,i)=>'ASSET'+String(i).padStart(3,'0'));
+ let calls=0,fallback=0;
+ const reader=new SpotQuoteReader({request:async request=>{
+  calls++;const symbols=requestedSymbols(request);
+  if(symbols.length===1)fallback++;
+  return response({code:-1121,msg:'fixture'},400);
+ }},()=>NOW);
+ const result=await reader.refreshSpotAssets(assets);
+ assert.equal(result.status,'budget-limited');assert.equal(result.budgetReason,'fallback-cap');
+ assert.equal(result.candidateCount,100);assert.equal(result.unexaminedCount,80);
+ assert.equal(result.requestCount,calls);assert.equal(result.fallbackRequestCount,fallback);
+ assert.ok(calls<=SPOT_QUOTE_MAX_REQUESTS);assert.ok(fallback<=SPOT_QUOTE_MAX_FALLBACK_REQUESTS);
+ assert.equal(calls,22);assert.equal(fallback,20);assert.equal(reader.getSpotQuotes().size,0);
+});
+
+test('exchangeInfo与ticker的-1121单项回退共享同一个20次额度',async()=>{
+ const assets=Array.from({length:11},(_,i)=>'TOKEN'+String(i).padStart(2,'0'));
+ let calls=0,fallback=0;
+ const reader=new SpotQuoteReader({request:async request=>{
+  calls++;const url=new URL(request.url),symbols=requestedSymbols(request),isSingle=symbols.length===1;
+  if(isSingle)fallback++;
+  if(url.pathname.endsWith('/exchangeInfo')){
+   if(!isSingle)return response({code:-1121,msg:'fixture'},400);
+   return response({symbols:[marketRow(symbols[0].slice(0,-4))]});
+  }
+  if(!isSingle)return response({code:-1121,msg:'fixture'},400);
+  return response([{symbol:symbols[0],price:'4'}]);
+ }},()=>NOW);
+ const result=await reader.refreshSpotAssets(assets);
+ assert.equal(result.status,'budget-limited');assert.equal(result.budgetReason,'fallback-cap');
+ assert.equal(result.marketCount,11);assert.equal(result.pricedCount,9);assert.equal(result.unexaminedCount,2);
+ assert.equal(result.fallbackRequestCount,20);assert.equal(fallback,20);
+ assert.equal(result.requestCount,calls);assert.equal(calls,22);assert.ok(calls<=SPOT_QUOTE_MAX_REQUESTS);
+});
+
+test('超过100个候选时明确记录候选截断且不把跳过项判为无效市场',async()=>{
+ const assets=Array.from({length:101},(_,i)=>'COIN'+String(i).padStart(3,'0'));
+ const reader=new SpotQuoteReader({request:async request=>{
+  const url=new URL(request.url),symbols=requestedSymbols(request);
+  if(url.pathname.endsWith('/exchangeInfo'))return response({symbols:symbols.map(s=>marketRow(s.slice(0,-4)))});
+  return response(symbols.map(symbol=>({symbol,price:'1.25'})));
+ }},()=>NOW);
+ const result=await reader.refreshSpotAssets(assets);
+ assert.equal(result.status,'budget-limited');assert.equal(result.budgetReason,'candidate-cap');
+ assert.equal(result.candidateCount,101);assert.equal(result.unexaminedCount,1);
+ assert.equal(result.marketCount,100);assert.equal(result.pricedCount,100);
+ assert.equal(result.requestCount,10);assert.ok(result.requestCount<=SPOT_QUOTE_MAX_REQUESTS);
+});
+
+test('ticker收到429或418后立即停止后续请求并保留冷却',async()=>{
+ for(const status of [429,418]){
+  let calls=0;
+  const reader=new SpotQuoteReader({request:async request=>{
+   calls++;return new URL(request.url).pathname.endsWith('/exchangeInfo')
+    ?response({symbols:[marketRow('BTC')]})
+    :{status,headers:{'Retry-After':'5'},body:'界'.repeat(700_000)};
+  }},()=>NOW);
+  await assert.rejects(reader.refreshSpotAssets(['BTC']),(error:unknown)=>error instanceof PublicMarketError&&error.code==='rate-limit');
+  assert.equal(calls,2);assert.ok(reader.getCooldownUntil()>NOW);
+  await assert.rejects(reader.refreshSpotAssets(['BTC']),(error:unknown)=>error instanceof PublicMarketError&&error.code==='rate-limit');
+  assert.equal(calls,2);assert.equal(reader.getSpotQuotes().size,0);
+ }
+});
+
+test('UTF-8字节上限拒绝多字节超限响应并接受正常ASCII和UTF-8 JSON',async()=>{
+ const oversized=JSON.stringify({symbols:[marketRow('BTC')],note:'界'.repeat(700_000)});
+ assert.ok(oversized.length<2*1024*1024);assert.ok(new TextEncoder().encode(oversized).byteLength>2*1024*1024);
+ const rejected=new SpotQuoteReader({request:async()=>({status:200,headers:{},body:oversized})},()=>NOW);
+ const rejectedResult=await rejected.refreshSpotAssets(['BTC']);
+ assert.equal(rejectedResult.status,'request-failed');assert.equal(rejectedResult.failedRequestCount,1);assert.equal(rejected.getSpotQuotes().size,0);
+ let calls=0;
+ const accepted=new SpotQuoteReader({request:async request=>{
+  calls++;const path=new URL(request.url).pathname;
+  return path.endsWith('/exchangeInfo')
+   ?response({symbols:[marketRow('BTC')],note:'币'})
+   :response([{symbol:'BTCUSDT',price:'1.25',note:'行情'}]);
+ }},()=>NOW);
+ const result=await accepted.refreshSpotAssets(['BTC']);
+ assert.equal(result.status,'complete');assert.equal(accepted.getSpotQuotes().get('BTC')?.value,'1.25');assert.equal(calls,2);
+});
+
+test('非200错误正文也按UTF-8字节预算解析，超限时不读取其中的-1121',async()=>{
+ const body='{"code":-1121,"msg":"'+('界'.repeat(30_000))+'"}';
+ assert.ok(body.length<64*1024);assert.ok(new TextEncoder().encode(body).byteLength>64*1024);
+ let calls=0;
+ const reader=new SpotQuoteReader({request:async()=>{calls++;return {status:400,headers:{},body};}},()=>NOW);
+ const result=await reader.refreshSpotAssets(['BTC']);
+ assert.equal(result.status,'request-failed');assert.equal(result.failedRequestCount,1);
+ assert.equal(result.requestCount,1);assert.equal(calls,1);assert.equal(result.marketCount,0);
+ assert.ok(!JSON.stringify(result).includes('-1121'));assert.ok(!JSON.stringify(result).includes('界'));
+});
+
+test('后续行情故障不会把前次报价冒充为本次成功报价',async()=>{
+ let fail=false;
+ const reader=new SpotQuoteReader({request:async request=>{
+  const url=new URL(request.url),symbols=requestedSymbols(request);
+  if(url.pathname.endsWith('/exchangeInfo'))return response({symbols:symbols.map(s=>marketRow(s.slice(0,-4)))});
+  return fail?response({error:'fixture'},503):response(symbols.map(symbol=>({symbol,price:'3'})));
+ }},()=>NOW);
+ const first=await reader.refreshSpotAssets(['BTC','ETH']);
+ assert.equal(first.status,'complete');assert.equal(reader.getSpotQuotes().size,2);
+ fail=true;const second=await reader.refreshSpotAssets(['BTC','ETH']);
+ assert.equal(second.status,'request-failed');assert.equal(second.pricedCount,0);assert.equal(reader.getSpotQuotes().size,0);
 });

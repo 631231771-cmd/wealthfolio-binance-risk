@@ -2,7 +2,7 @@ import type { NetworkAPI, NetworkRequest } from '@wealthfolio/addon-sdk';
 import { BinanceCredentials } from './credentials';
 import { buildOfflineReadRequest, signPayload } from './binance';
 import { calibrateTime, classifyResponse, spotSnapshot, SpotError, spotShock, ClockError, SpotValidationError, type ClockDetails, type SpotValidationDetails } from './spot';
-import { SpotQuoteReader, mergeDynamicPublicSpotPrices, PUBLIC_ORIGIN } from './public-market';
+import { PublicMarketError, SpotQuoteReader, mergeDynamicPublicSpotPrices, PUBLIC_ORIGIN, type SpotQuoteRefreshResult } from './public-market';
 import { assetKey, calculateRisk, type PortfolioState } from './domain';
 
 export const DIRECT_INTERVAL=300_000, DIRECT_TTL=360_000;
@@ -36,7 +36,7 @@ export function restrictionRequest(key:string,secret:string,timestamp:number):Ne
 }
 const empty=():PortfolioState=>({schemaVersion:1,accounts:[],snapshots:{},statuses:{}});
 export type DirectStage='idle'|'credentials'|'clock'|'permissions'|'balance'|'identity'|'quotes'|'complete'|'disconnected';
-export interface DirectDiagnostic {stage:DirectStage;code:string;httpStatus?:number;exchangeCode?:number;permissionReason?:PermissionReason;permissionFields?:PermissionField[];layer?:'plugin-timer'|'host-call'|'http-response'|'clock-validation'|'account-validation'|'snapshot-validation';elapsedMs?:number;clock?:ClockDetails;jsonValid?:boolean;validation?:SpotValidationDetails}
+export interface DirectDiagnostic {stage:DirectStage;code:string;httpStatus?:number;exchangeCode?:number;permissionReason?:PermissionReason;permissionFields?:PermissionField[];layer?:'plugin-timer'|'host-call'|'http-response'|'clock-validation'|'account-validation'|'snapshot-validation';elapsedMs?:number;clock?:ClockDetails;jsonValid?:boolean;validation?:SpotValidationDetails;quote?:SpotQuoteRefreshResult}
 export interface TimeObservation {host:'MARKET'|'SPOT';attempt:number;code:string;elapsedMs?:number;httpStatus?:number;exchangeCode?:number;serverTimeValid?:boolean;offsetMs?:number;reason?:ClockDetails['reason'];layer?:DirectDiagnostic['layer']}
 export interface DirectRetry {canRetry:boolean;reason:'ready'|'in-flight'|'exchange-limit'|'backoff'|'confirmation-required'|'page-hidden';waitSeconds:number}
 // 独立真实会话；旧离线reader的硬阻断不变。没有持仓存储/宿主账本写入能力。
@@ -215,10 +215,14 @@ export class DirectSpot {
     try{
       const state=this.getState(),account=state.accounts[0],snapshot=account?state.snapshots[account.id]:undefined;
       if(!account||!snapshot||snapshot.dataMode!=='external')throw new SpotError('invalid');
-      await this.quotes.refreshSpotAssets(snapshot.positions.map(position=>position.asset.code));
-      if(this.connected&&this.visible&&epoch===this.epoch)this.diagnostic={stage:'complete',code:'OK'};
-    }catch{
-      if(this.connected&&this.visible&&epoch===this.epoch)this.diagnostic={stage:'quotes',code:'QUOTES_UNAVAILABLE'};
+      const result=await this.quotes.refreshSpotAssets(snapshot.positions.map(position=>position.asset.code));
+      const codes={complete:'QUOTE_COMPLETE',partial:'QUOTE_PARTIAL','request-failed':'QUOTE_REQUEST_FAILED','no-market':'QUOTE_NO_MARKET','no-candidates':'QUOTE_NO_CANDIDATES','budget-limited':'QUOTE_BUDGET_LIMITED'} as const;
+      if(this.connected&&this.visible&&epoch===this.epoch)this.diagnostic={stage:'quotes',code:codes[result.status],quote:result};
+    }catch(error){
+      const code=error instanceof PublicMarketError?({
+        network:'QUOTE_REQUEST_FAILED',timeout:'QUOTE_TIMEOUT','rate-limit':'QUOTE_RATE_LIMIT',invalid:'QUOTE_INVALID',disconnected:'QUOTE_DISCONNECTED',busy:'QUOTE_BUSY'
+      } as const)[error.code]:'QUOTES_UNAVAILABLE';
+      if(this.connected&&this.visible&&epoch===this.epoch)this.diagnostic={stage:'quotes',code};
     }finally{this.busy=false;}
   }
   valued(){

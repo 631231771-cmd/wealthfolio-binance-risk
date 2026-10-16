@@ -62,7 +62,7 @@ test('首次连接：已结束的宿主失败可以有限重试，合格样本�
 test('数量连接成功后，独立行情失败不得撤销余额或伪装零；UID/缺余额仍拒绝',async()=>{
   const h=await fixture([100],{uid:7,accountType:'SPOT',balances:[{asset:'BTC',free:'0.5',locked:'0'}]});await h.reader.sync();assert.equal(h.reader.getStatus().success,true);
   const before=h.reader.getState();await h.reader.refreshQuotes();assert.deepEqual(h.reader.getState(),before);
-  assert.equal(h.reader.getStatus().success,true);assert.equal(h.reader.getDiagnostic().code,'QUOTES_UNAVAILABLE');
+  assert.equal(h.reader.getStatus().success,true);assert.equal(h.reader.getDiagnostic().code,'QUOTE_REQUEST_FAILED');
   for(const body of [{uid:8,accountType:'SPOT',balances:[]},{uid:7,accountType:'SPOT'}]){
     const bad=await fixture([100],body);await bad.reader.sync();assert.equal(bad.reader.getStatus().success,false);assert.equal(bad.reader.valued().report.total,null);
   }

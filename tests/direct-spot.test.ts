@@ -4,11 +4,12 @@ import assert from 'node:assert/strict';
 import {DirectSpot,assertReadOnly,DIRECT_INTERVAL,DIRECT_TTL,restrictionRequest} from '../src/direct-spot';
 import {BinanceCredentials} from '../src/credentials';
 import {SpotQuoteReader} from '../src/public-market';
+import {describeDiagnostic} from '../src/direct-panel';
 import {signPayload} from '../src/binance';
 const permissions={enableReading:true,ipRestrict:true,enableWithdrawals:false,enableInternalTransfer:false,enableMargin:false,enableFutures:false,permitsUniversalTransfer:false,enableVanillaOptions:false,enableFixApiTrade:false,enableSpotAndMarginTrading:false,enablePortfolioMarginTrading:false};
 const ack={risk:true,smallAccount:true,readOnlyPage:true,aiIsolated:true};
 async function harness(timeout=100){
- let now=Date.parse('2026-10-15T00:00:00Z'),calls:string[]=[],mode='ok',release:(()=>void)|undefined,blockedPath='';
+ let now=Date.parse('2026-10-15T00:00:00Z'),calls:string[]=[],mode='ok',quoteFailure=false,release:(()=>void)|undefined,blockedPath='';
  let privateResponse:NetworkResponse|undefined;
  const values=new Map<string,string>(),credentials=new BinanceCredentials({set:async(k,v)=>{values.set(k,v);},get:async k=>values.get(k)??null,delete:async k=>{values.delete(k);}});
  await credentials.save('TEST_KEY_NOT_REAL','TEST_SECRET_NOT_REAL');
@@ -19,6 +20,7 @@ async function harness(timeout=100){
   if(privateRequest){assert.ok(['/api/v3/account','/sapi/v1/account/apiRestrictions'].includes(u.pathname));const raw=u.searchParams.get('timestamp')!;assert.equal(u.searchParams.get('signature'),signPayload(`timestamp=${raw}&recvWindow=5000`,'TEST_SECRET_NOT_REAL'));assert.equal(req.headers?.['X-MBX-APIKEY'],'TEST_KEY_NOT_REAL');}
   else assert.equal(req.headers,undefined);
   if(u.pathname===blockedPath)await new Promise<void>(r=>{release=r;});
+  if(u.pathname==='/api/v3/ticker/price'&&quoteFailure)return {status:503,headers:{},body:'SENSITIVE fake response signature=RAW'};
   if(privateResponse&&privateRequest)return privateResponse;
   if(mode==='network'&&privateRequest)throw new Error('TEST_SECRET_NOT_REAL signature=RAW URL '+req.url);
   if(mode==='limit'&&privateRequest)return {status:429,headers:{'Retry-After':'3600'},body:'<html>WAF</html>'};
@@ -32,7 +34,7 @@ async function harness(timeout=100){
  }};
  const quotes=new SpotQuoteReader(network,()=>now),reader=new DirectSpot(credentials,network,quotes,()=>now,timeout);
  reader.setVisible(true);
- return {reader,calls,credentials,setResponse:(r:NetworkResponse|undefined)=>{privateResponse=r;},setMode:(m:string)=>{mode=m;},advance:(ms:number)=>{now+=ms;},block:(path:string)=>{blockedPath=path;},release:()=>release?.()};
+ return {reader,calls,credentials,setResponse:(r:NetworkResponse|undefined)=>{privateResponse=r;},setMode:(m:string)=>{mode=m;},setQuoteFailure:(value:boolean)=>{quoteFailure=value;},advance:(ms:number)=>{now+=ms;},block:(path:string)=>{blockedPath=path;},release:()=>release?.()};
 }
 
 test('HTTP400先解析数字业务码，诊断不含msg、URL或认证信息',async()=>{
@@ -125,6 +127,34 @@ test('单独更新行情只读取当前余额资产代码，不再请求账户/�
  await h.reader.refreshQuotes();
  assert.equal(privateCount(),before);assert.deepEqual(h.reader.getState().snapshots[Object.keys(h.reader.getState().snapshots)[0]].positions.map(p=>p.quantity),balance);
  assert.ok(h.calls.includes('/api/v3/exchangeInfo'));assert.ok(h.calls.includes('/api/v3/ticker/price'));
+});
+test('公开报价503不显示同步成功、不改动已验证余额数量且诊断不带敏感响应',async()=>{
+ const h=await harness();h.reader.authorize('1',ack);await h.reader.sync();
+ const account=Object.keys(h.reader.getState().snapshots)[0];
+ const before=h.reader.getState().snapshots[account].positions.map(position=>position.quantity);
+ const privateCallsBefore=h.calls.filter(path=>path==='/api/v3/account'||path==='/sapi/v1/account/apiRestrictions').length;
+ h.setQuoteFailure(true);await h.reader.refreshQuotes();
+ const diagnostic=h.reader.getDiagnostic(),detail=describeDiagnostic(diagnostic);
+ assert.equal(diagnostic.code,'QUOTE_REQUEST_FAILED');assert.equal(diagnostic.quote?.status,'request-failed');
+ assert.equal(diagnostic.quote?.failedRequestCount,1);assert.equal(diagnostic.quote?.pricedCount,0);
+ assert.match(detail.text,/公开行情请求失败/);assert.match(detail.metadata,/请求失败1/);
+ assert.deepEqual(h.reader.getState().snapshots[account].positions.map(position=>position.quantity),before);
+ assert.equal(h.calls.filter(path=>path==='/api/v3/account'||path==='/sapi/v1/account/apiRestrictions').length,privateCallsBefore);
+ assert.ok(!/SENSITIVE|signature|https:|TEST_SECRET/.test(JSON.stringify(diagnostic)));
+});
+test('行情诊断映射区分无候选、无市场、部分覆盖及预算截断',()=>{
+ const base={assetCount:4,candidateCount:3,marketCount:2,pricedCount:1,failedRequestCount:0,unexaminedCount:1,requestCount:4,fallbackRequestCount:1};
+ for(const [status,code,pattern] of [
+  ['no-candidates','QUOTE_NO_CANDIDATES',/没有需要查询/],
+  ['no-market','QUOTE_NO_MARKET',/没有可用的USDT现货交易对/],
+  ['partial','QUOTE_PARTIAL',/部分可用/],
+  ['budget-limited','QUOTE_BUDGET_LIMITED',/覆盖受请求预算限制/],
+ ] as const){
+  const detail=describeDiagnostic({stage:'quotes',code,quote:{...base,status,budgetReason:status==='budget-limited'?'candidate-cap':undefined}});
+  assert.equal(detail.code,code);assert.match(detail.text,pattern);assert.match(detail.metadata,/未覆盖1/);
+ }
+ const hostile=describeDiagnostic({stage:'quotes',code:'QUOTE_PARTIAL',quote:{...base,status:'partial',requestCount:'secret' as any,budgetReason:'secret' as any}});
+ assert.ok(!JSON.stringify(hostile).includes('secret'));
 });
 test('额外权限/错误UID/缺余额停止，不能降级为成功空资产',async()=>{
  for(const mode of ['trade','uid','missing']){const h=await harness();h.reader.authorize('1',ack);h.setMode(mode);await h.reader.sync();assert.equal(h.reader.getStatus().connected,false);assert.equal(h.reader.valued().report.coveredSubtotal,null);assert.equal(h.reader.getDiagnostic().code,{trade:'READ_ONLY_REJECTED',uid:'UID_MISMATCH',missing:'SPOT_INVALID'}[mode]);if(mode==='trade')assert.ok(!h.calls.includes('/api/v3/account'));}
