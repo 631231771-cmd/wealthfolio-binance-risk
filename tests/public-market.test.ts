@@ -37,12 +37,22 @@ test('公开构造固定HTTPS主机/三个GET；不支持私人路径、URL或�
   assert.throws(()=>publicMarketRequest('price',['BTCUSDT&signature=fake']));
   assert.throws(()=>publicMarketRequest('price',[]));
 });
-test('清单只允许已授权公开主机与直接Spot主机，无use或宿主资产权限',()=>{
+// v0.3.0：原生同步需要 accounts/snapshots/quotes/currency/settings，均为显式声明；
+// 仍不得出现删除快照、活动、组合重算或额外市场数据权限。
+test('清单只声明本轮需要的原生写入权限，且不含删除或组合重算能力',()=>{
   const manifest=JSON.parse(readFileSync('manifest.json','utf8'));
   assert.deepEqual(manifest.network,{allowedHosts:['data-api.binance.vision','api.binance.com']});
-  assert.deepEqual(manifest.permissions.map((p:any)=>p.category),['secrets','files','network']);
-  assert.deepEqual(manifest.permissions.find((p:any)=>p.category==='network').functions,['request']);
-  assert.deepEqual(manifest.permissions.find((p:any)=>p.category==='secrets').functions,['set','get','delete']);
+  assert.deepEqual(manifest.permissions.map((p:any)=>p.category),['secrets','files','network','accounts','snapshots','quotes','currency','settings']);
+  const fns=(category:string)=>manifest.permissions.find((p:any)=>p.category===category).functions;
+  assert.deepEqual(fns('network'),['request']);
+  assert.deepEqual(fns('secrets'),['set','get','delete']);
+  assert.deepEqual(fns('accounts'),['getAll','create']);
+  assert.deepEqual(fns('snapshots'),['getAll','getByDate','checkImport','save']);
+  assert.deepEqual(fns('quotes'),['update']);
+  assert.deepEqual(fns('currency'),['getRatesForDates']);
+  assert.deepEqual(fns('settings'),['get']);
+  for(const forbidden of ['portfolio','activities','market-data','performance','alternative-assets'])assert.ok(!manifest.permissions.some((p:any)=>p.category===forbidden),forbidden);
+  assert.ok(!fns('snapshots').includes('delete'));
 });
 test('将公开报价应用到外部 Spot 数量，不带入模拟数量；未知资产与旧价未定价',async()=>{
   const f=fixture();await f.reader.refresh();

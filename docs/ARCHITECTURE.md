@@ -1,5 +1,9 @@
 # 架构与边界
 
+## v0.3.0 原生账户同步
+
+新增 `native-sync`（纯映射：资产身份、账户哈希、写入指纹、读回对账）、`native-host`（探测/预览/写入/报价适配）、`native-panel`（第三页签）、`cost-basis`（手动成本与部分覆盖盈亏）、`trade-cost`（FIFO 原型）。数据流：DirectSpot 估值 → native-sync 映射 → 本人预览确认 → snapshots.save → getByDate 读回对账 → quotes.update。原生写入不进入插件自己的账本，插件也不消费原生持仓作为第二来源。
+
 ## v0.2.2 数据可信度增量
 
 `SpotQuoteReader` 的结果从单一 `pricedCount` 拆成"新报价 / 沿用旧价 / 暂时缺价 / 无市场 / 请求失败"五类；刷新失败只记录，不销毁仍在 TTL 内的报价。`pause()` 与 `disconnect()` 分离，页面隐藏不再清空价格。`DirectSpot` 的参考记录用 `balanceIdentity`（账户+来源+资产+数量，不含时间）判断能否复用，并阻止完整记录被同余额的部分估值降级。展示层新增 `valuationState`/`heroLabel`，把"当前完整、已定价小计、历史完整、历史部分、真实零、不可信"收敛为唯一口径。细节与测试矩阵见[PRODUCT-0.2.2](PRODUCT-0.2.2.md)。

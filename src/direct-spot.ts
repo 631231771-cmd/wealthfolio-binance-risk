@@ -4,6 +4,7 @@ import { buildOfflineReadRequest, signPayload } from './binance';
 import { calibrateTime, classifyResponse, spotSnapshot, SpotError, spotShock, ClockError, SpotValidationError, type ClockDetails, type SpotValidationDetails } from './spot';
 import { PublicMarketError, SpotQuoteReader, mergeDynamicPublicSpotPrices, PUBLIC_ORIGIN, type SpotQuoteRefreshResult } from './public-market';
 import { assetKey, balanceIdentity, calculateRisk, type PortfolioState } from './domain';
+import { nativeAccountKey } from './native-sync';
 
 export const DIRECT_INTERVAL=300_000, DIRECT_TTL=360_000;
 export const QUOTE_INTERVAL=60_000, QUOTE_TTL=120_000;
@@ -58,6 +59,8 @@ export class DirectSpot {
   constructor(private credentials:BinanceCredentials,private network:Pick<NetworkAPI,'request'>,private quotes:SpotQuoteReader,private now=Date.now,private timeout=15_000,private monotonic=()=>performance.now()){}
   getState(){return structuredClone(this.state);}
   getReference(){return structuredClone(this.reference);}
+  // 原生账户绑定只用不可逆短哈希；原始 UID 不离开本会话。
+  getAccountKey(){return this.uid?nativeAccountKey(this.uid):null;}
   getHistoricalQuotes(){return this.quotes.getHistoricalQuotes();}
   getDiagnostic(){return structuredClone(this.diagnostic);}
   getTimeObservations(){return structuredClone(this.timeObservations);}

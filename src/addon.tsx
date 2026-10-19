@@ -10,6 +10,7 @@ import { SpotOfflineReader, spotRisk, spotShock, SpotError } from './spot';
 import { spotFixtureTransport, type SpotScenario } from './spot-fixture';
 import { PublicMarketReader, PublicMarketError, SpotQuoteReader, publicMarketRisk } from './public-market';
 import { SpotBridge } from './spot-bridge';
+import { createHostBridge } from './native-host';
 import './style.css';
 
 export function SpotHoldingsTable({state,report,publicQuotes=false}:{state:PortfolioState;report:ReturnType<typeof spotRisk>;publicQuotes?:boolean}) {
@@ -161,6 +162,8 @@ const enable: AddonEnableFunction = async ctx => {
   const network={request:(request:Parameters<AddonContext['api']['network']['request']>[0])=>ctx.api.network.request(request)};
   const realCredentials=new BinanceCredentials(ctx.api.secrets);
   const direct=new DirectSpot(realCredentials,network,new SpotQuoteReader(network));
+  // 原生写入能力只在本人点击预览并确认后才会调用；构造本身不读取任何账户。
+  const nativeHost=createHostBridge(ctx.api);
   ctx.onDisable(()=>direct.disconnect());
   let initial = emptyState();
   const saved = await ctx.api.storage.get('fixture-state-v1');
@@ -170,7 +173,7 @@ const enable: AddonEnableFunction = async ctx => {
   }
   const Page = () => {
     const [developer,setDeveloper]=useState(false);
-    return developer?<DeveloperWorkbench ctx={ctx} initial={initial} onBack={()=>setDeveloper(false)}/>:<main className="wrisk-app"><DirectSpotPanel reader={direct} credentials={realCredentials} onOpenDeveloper={()=>setDeveloper(true)}/></main>;
+    return developer?<DeveloperWorkbench ctx={ctx} initial={initial} onBack={()=>setDeveloper(false)}/>:<main className="wrisk-app"><DirectSpotPanel reader={direct} credentials={realCredentials} host={nativeHost} onOpenDeveloper={()=>setDeveloper(true)}/></main>;
   };
   ctx.router.add({ id:'wealthfolio-binance-risk',path:'/addons/wealthfolio-binance-risk',component:Page });
 };

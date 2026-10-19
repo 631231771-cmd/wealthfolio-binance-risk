@@ -1,8 +1,8 @@
 {
   "id": "wealthfolio-binance-risk",
   "name": "币安资产总览",
-  "version": "0.2.2",
-  "description": "Binance Spot只读资产总览、独立公开行情刷新及明确历史估值；成本未核实不计算盈亏。",
+  "version": "0.3.0",
+  "description": "Binance Spot 只读连接、原生账户同步与成本基础；历史估值与公开行情独立，未核实成本不计算盈亏。",
   "author": "个人项目",
   "main": "dist/addon.js",
   "sdkVersion": "3.9.0",
@@ -53,6 +53,45 @@
         "request"
       ],
       "purpose": "固定公开GET行情；本人确认后仅GET Spot account及apiRestrictions，无交易/划转/提现"
+    },
+    {
+      "category": "accounts",
+      "functions": [
+        "getAll",
+        "create"
+      ],
+      "purpose": "读取账户列表以识别已绑定的 Binance 账户；仅在本人预览并确认后创建独立的 CRYPTOCURRENCY 只读账户，不修改其他账户"
+    },
+    {
+      "category": "snapshots",
+      "functions": [
+        "getAll",
+        "getByDate",
+        "checkImport",
+        "save"
+      ],
+      "purpose": "本人确认后写入当日持仓快照，并读回数量对账；checkImport 仅用于写入前预览"
+    },
+    {
+      "category": "quotes",
+      "functions": [
+        "update"
+      ],
+      "purpose": "把 Binance 公开行情写入已映射资产的报价；跳过手动报价资产"
+    },
+    {
+      "category": "currency",
+      "functions": [
+        "getRatesForDates"
+      ],
+      "purpose": "只读检查 USDT 到基础货币的汇率是否存在，缺失时阻止写入"
+    },
+    {
+      "category": "settings",
+      "functions": [
+        "get"
+      ],
+      "purpose": "只读用户的基础货币设置，用于判断是否需要 USDT 汇率"
     }
   ],
   "network": {

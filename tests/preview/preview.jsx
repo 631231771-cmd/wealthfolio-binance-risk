@@ -40,10 +40,33 @@ async function scenario(name){
  reader.tick=async()=>{};
  return {reader,credentials};
 }
+
+// 虚构宿主：只在预览里模拟原生账户，不连接 Wealthfolio、不写任何真实资料库。
+const nativeAccounts=[],nativeSaves=[];
+const mockNativeHost={
+ listAccounts:async()=>nativeAccounts,
+ createAccount:async input=>{const a={id:'native-preview-account',...input};nativeAccounts.push(a);return a;},
+ checkImport:async()=>({existingDates:[],symbols:[],validationErrors:[]}),
+ saveSnapshot:async(id,holdings,cash,date)=>{nativeSaves.push({id,holdings,cash,date});},
+ listSnapshots:async()=>[{snapshotDate:nativeSaves.at(-1)?.date??'',positionCount:nativeSaves.at(-1)?.holdings.length??0,cashCurrencyCount:1}],
+ getByDate:async()=>(nativeSaves.at(-1)?.holdings??[]).map(h=>({symbol:h.symbol,quantity:Number(h.quantity),assetId:'asset-'+h.symbol,quoteMode:'MARKET'})),
+ updateQuote:async()=>{},
+ baseCurrency:async()=>'USD',usdtRate:async()=>0.9998,
+ today:()=>new Date().toISOString().slice(0,10)
+};
+
 const initial=await scenario('usdc');
 function Preview(){
  const [active,setActive]=useState('usdc'),[data,setData]=useState(initial),[width,setWidth]=useState('auto');
  const set=async next=>{data.reader.disconnect();setData(await scenario(next));setActive(next);};
- return <><div id="preview-label"><span>仅虚构数据 · 内存 transport · 不连接宿主或账户</span><div>{[['complete','完整估值'],['usdc','USDC主仓'],['stale','余额过期'],['price-stale','报价过期'],['partial','部分缺价'],['failure','报价失败'],['balance-failure','余额失败'],['dust','多微额过期'],['zero','成功零余额']].map(([key,label])=><button key={key} aria-pressed={active===key} onClick={()=>void set(key)}>{label}</button>)}<label>窗口宽度 <select value={width} onChange={e=>setWidth(e.target.value)}><option value="auto">自适应</option><option value="920">920px</option><option value="420">420px</option></select></label></div></div><div id="preview-frame" style={{width:width==='auto'?'100%':width+'px',maxWidth:'100%',margin:'auto',containerType:'inline-size'}}><main className="wrisk-app"><DirectSpotPanel key={active} reader={data.reader} credentials={data.credentials}/></main></div></>;
+ return <><div id="preview-label"><span>仅虚构数据 · 内存 transport · 不连接宿主或账户</span><div>{[['complete','完整估值'],['usdc','USDC主仓'],['stale','余额过期'],['price-stale','报价过期'],['partial','部分缺价'],['failure','报价失败'],['balance-failure','余额失败'],['dust','多微额过期'],['zero','成功零余额']].map(([key,label])=><button key={key} aria-pressed={active===key} onClick={()=>void set(key)}>{label}</button>)}<label>窗口宽度 <select value={width} onChange={e=>setWidth(e.target.value)}><option value="auto">自适应</option><option value="920">920px</option><option value="420">420px</option></select></label></div></div><div id="preview-frame" style={{width:width==='auto'?'100%':width+'px',maxWidth:'100%',margin:'auto',containerType:'inline-size'}}><main className="wrisk-app"><DirectSpotPanel key={active} reader={data.reader} credentials={data.credentials} host={mockNativeHost}/></main></div></>;
 }
 createRoot(document.getElementById('root')).render(<Preview/>);
+if(location.hash.slice(1).startsWith('native')){
+ const click=(text,delay)=>setTimeout(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);b?.click();},delay);
+ click('原生同步',200);click('检测宿主能力',700);click('生成导入预览',1200);
+ if(location.hash.slice(1)==='native-done'){
+  setTimeout(()=>{const c=document.querySelector('.native-confirm input[type=checkbox]');if(c&&!c.checked)c.click();},1700);
+  click('写入原生账户',2100);
+ }
+}

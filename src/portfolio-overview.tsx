@@ -1,6 +1,7 @@
-import {useState,useRef,useEffect} from 'react';
+import {useState,useRef,useEffect,type ReactNode} from 'react';
 import {nonnegative} from './domain';
 import {portfolioPresentation,assetTone,heroLabel,displayAmount as money,displayPercent as percent,displayTime as time,displayQuantity,displayPrice,type Valuation,type Reference} from './portfolio-view';
+import {costSummary,costHeadline,type CostBook} from './cost-basis';
 
 // Local decorative marks only; identity always comes from the full asset code.
 function AssetMark({code}:{code:string}){
@@ -8,13 +9,18 @@ function AssetMark({code}:{code:string}){
   return <span className={'asset-icon '+(mark?'coin-'+code.toLowerCase():'coin-other')} aria-hidden="true">{mark??<span className="asset-monogram">{code.slice(0,2).toUpperCase()}</span>}</span>;
 }
 
-export function PortfolioOverview({value,reference=null}: {value:Valuation;reference?:Reference|null}){
+export function PortfolioOverview({value,reference=null,costs,nativePanel}: {value:Valuation;reference?:Reference|null;costs?:CostBook;nativePanel?:ReactNode}){
   const {view,current,displayed,historical,sameBalances,state,at,balanceAt,priceFrom,priceTo}=portfolioPresentation(value,reference);
   const {report}=value;
-  const [tab,setTab]=useState<'overview'|'risk'>('overview'),[selected,setSelected]=useState<string|null>(null),[showDust,setShowDust]=useState(false);
+  const [tab,setTab]=useState<'overview'|'native'|'risk'>('overview'),[selected,setSelected]=useState<string|null>(null),[showDust,setShowDust]=useState(false);
   const dialog=useRef<HTMLDialogElement>(null);
   const row=view.rows.find(r=>r.key===selected);
   useEffect(()=>{if(row&&!dialog.current?.open)dialog.current?.showModal();if(!row&&dialog.current?.open)dialog.current.close();},[row?.key]);
+  // 盈亏与当前展示的估值同口径：历史视图下也是那一份记录的成本与市值。
+  const cost=costSummary(displayed.state,displayed.report,costs??{});
+  const headline=costHeadline(cost);
+  const gain= headline.value!==null?nonnegative(headline.value):null;
+  const gainTone=gain?(gain.isZero()?'':gain.isNegative()?' is-down':' is-up'):'';
   const unavailable=state==='unavailable';
   const missing=view.rows.length-view.priced;
   // 部分覆盖时，主数值是"已定价小计"，不是完整总值；缺价项数必须紧邻显示。
@@ -34,7 +40,7 @@ export function PortfolioOverview({value,reference=null}: {value:Valuation;refer
     <td className="number quantity" title={r.quantity}>{displayQuantity(r.quantity)}</td><td className="number price" title={r.price?.value}>{displayPrice(r.price?.value)}</td><td className="number value">{money(r.value)}{r.value===undefined&&<small>{view.balanceCurrent?'缺少有效价格':'余额已失效'}</small>}</td>
   </tr>)}</tbody></table></div>;
   return <>
-    <nav className="portfolio-tabs" aria-label="资产视图"><button aria-pressed={tab==='overview'} onClick={()=>setTab('overview')}>资产总览</button><button aria-pressed={tab==='risk'} onClick={()=>setTab('risk')}>风险分析</button></nav>
+    <nav className="portfolio-tabs" aria-label="资产视图"><button aria-pressed={tab==='overview'} onClick={()=>setTab('overview')}>资产总览</button>{nativePanel&&<button aria-pressed={tab==='native'} onClick={()=>setTab('native')}>原生同步</button>}<button aria-pressed={tab==='risk'} onClick={()=>setTab('risk')}>风险分析</button></nav>
     {tab==='overview'?<>
       <section className={'portfolio-hero'+(historical?' is-history':'')} aria-label="资产总览" data-valuation={state}>
         <div className="portfolio-total"><p className={'eyebrow'+(partial?' is-partial':'')}>{title}<span className={'valuation-tag '+(state.startsWith('history')?'tag-history':state==='live'||state==='zero'?'tag-current':'')}>{tag}</span></p>
@@ -45,7 +51,8 @@ export function PortfolioOverview({value,reference=null}: {value:Valuation;refer
         <div className="portfolio-summary" aria-label="估值摘要">
           <div><span>估值覆盖</span><strong>{view.rows.length?`${view.priced} / ${view.rows.length} 项`:'—'}</strong></div>
           <div><span>最大单资产</span><strong>{largest?`${largest.code} ${percent(largest.weight)}`:'—'}</strong></div>
-          <p className="cost-status">成本尚未核实 · 暂不显示盈亏</p>
+          <div><span>{headline.label}</span><strong className={'cost-value'+gainTone}>{gain===null?'—':gain.isZero()?'0.00':`${gain.isNegative()?'-':'+'}${money(gain.abs().toFixed())}`}</strong></div>
+          <p className="cost-status">{cost.state==='none'?'成本尚未核实 · 暂不显示盈亏':`${headline.pct===null?'—':(Number(headline.pct)*100).toFixed(2)+'%'} · ${cost.state==='partial'?'仅已核实成本部分':'已核实成本'}`}</p>
         </div>
         <div className="portfolio-meta"><span>余额采集 <strong>{time(balanceAt)}</strong></span><span>报价采集 <strong>{priceFrom?time(priceFrom)+(priceTo!==priceFrom?' — '+time(priceTo):''):'暂无市场报价'}</strong></span>{historical&&<span>历史记录 <strong>{time(at)}</strong></span>}</div>
       </section>
@@ -67,7 +74,7 @@ export function PortfolioOverview({value,reference=null}: {value:Valuation;refer
           <p className="card-footnote">{historical?'历史配置不参与当前风险计算':'包含稳定币 · 按已估值市值排序'}</p>
         </section>
       </div>
-    </>:<section className="portfolio-card risk-page"><div className="section-heading"><h2>风险分析</h2><span>{current.complete?'当前完整估值':'当前已估值范围'}</span></div><p className="coverage-callout">{current.complete?'以下是静态压力情景，不是预测。':report.coveredSubtotal===null?'当前风险不可用。历史估值仅供查看，不参与当前风险计算。':'当前覆盖不完整，以下指标不能代表整个账户的风险。'}</p><div className="risk-metrics"><article><span>压力情景损失</span><strong>{money(report.stressLoss)} <small>USDT</small></strong><p>非 USDT 资产统一下跌 20%，包含其他稳定币。</p></article><article><span>最大单资产占比</span><strong>{percent(report.maxAssetWeight)}</strong><p>以当前已估值资产为分母。</p></article></div></section>}
+    </>:tab==='native'?nativePanel:<section className="portfolio-card risk-page"><div className="section-heading"><h2>风险分析</h2><span>{current.complete?'当前完整估值':'当前已估值范围'}</span></div><p className="coverage-callout">{current.complete?'以下是静态压力情景，不是预测。':report.coveredSubtotal===null?'当前风险不可用。历史估值仅供查看，不参与当前风险计算。':'当前覆盖不完整，以下指标不能代表整个账户的风险。'}</p><div className="risk-metrics"><article><span>压力情景损失</span><strong>{money(report.stressLoss)} <small>USDT</small></strong><p>非 USDT 资产统一下跌 20%，包含其他稳定币。</p></article><article><span>最大单资产占比</span><strong>{percent(report.maxAssetWeight)}</strong><p>以当前已估值资产为分母。</p></article></div></section>}
     <dialog className="asset-detail" aria-labelledby="asset-detail-title" ref={dialog} onClose={()=>setSelected(null)} onClick={e=>{if(e.target===e.currentTarget)dialog.current?.close();}}>{row&&<div><header className="section-heading"><div><p className="eyebrow">{historical?'历史快照':'SPOT'} · 资产详情</p><h2 id="asset-detail-title">{row.code}</h2></div><button onClick={()=>dialog.current?.close()} aria-label="关闭资产详情">关闭</button></header><dl>
       <div><dt>{historical?'当时数量':'持有数量'}</dt><dd>{displayQuantity(row.quantity)}</dd></div>
       <div><dt>可用 / 锁定</dt><dd>{row.free===undefined?'—':displayQuantity(row.free)} / {row.locked===undefined?'—':displayQuantity(row.locked)}</dd></div>

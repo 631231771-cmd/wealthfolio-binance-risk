@@ -1,6 +1,14 @@
 # 当前状态
 
-## v0.2.2 数据可信度与界面精修（2026-10-19）
+## v0.3.0 原生账户同步与成本基础（2026-10-19）
+
+- 基线 81a1781（0.2.2）；工作树 F:\Code\wrisk-ds，分支 review/ds-0.2.1，未推送、未合并 main。
+- 依据 SDK 3.9.0 类型与 Wealthfolio v3.10.0 源码确认：accounts.create 支持 CRYPTOCURRENCY/HOLDINGS；snapshots.save 按 CRYPTO:SYMBOL/QUOTE 去重资产；averageCost 写入成本；USDT 作为现金；USDT→基础货币汇率缺失时阻止写入。
+- 新增 native-sync（映射/身份/指纹/对账）、native-host（探测/预览/写入/报价）、native-panel（第三页签）、cost-basis（部分覆盖盈亏）、trade-cost（FIFO 原型）。Hero 增加成本口径；新增 accounts/snapshots/quotes/currency/settings 权限，未申请删除或组合重算。
+- 验证：244 项测试通过（+25），tsc 0 错，npm run verify 全通过（含原生自检）；虚构宿主端到端：创建账户→写快照→读回 5 项一致→写 5 项报价。未对真实资料库写入。
+- 下一步：本人在独立测试资料库安装 0.3.0，检测能力→预览→确认写入；Astra 审核 native-* 与权限变更。
+
+## v0.2.2 数据可信度与界面精修（历史）
 
 - 基线 dd438c6（0.2.1）；全部改动在独立工作树 F:\Code\wrisk-ds，分支 review/ds-0.2.1，未触碰共享目录的受版本控制文件。
 - 报价：失败不再清空 120 秒 TTL 内的已验证报价；结果拆为 priced/retained/missingQuote/noMarket/failedRequest，只有请求级失败驱动退避；-1220 归暂时缺价；首次重试 30 秒（60/120/240，上限 300）；页面隐藏只 pause，不销毁价格。

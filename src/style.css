@@ -171,3 +171,24 @@
 .wrisk-app .previous-valuation { font-size:11px; color:var(--muted); margin-top:12px; }
 .wrisk-app .previous-valuation small { display:block; font-size:10px; margin-top:4px; }
 @media(max-width:620px) { .wrisk-app { padding:20px 14px; } }
+/* Native sync workspace: connection, cost entry, preview and read-back. */
+.wrisk-app .native-page { display:flex; flex-direction:column; gap:16px; }
+.wrisk-app .native-page > .portfolio-card { padding-bottom:20px; }
+.wrisk-app .native-lead { margin:0 24px 14px; font-size:12px; color:var(--muted); line-height:1.7; }
+.wrisk-app .native-actions { display:flex; gap:10px; flex-wrap:wrap; padding:0 24px; }
+.wrisk-app .native-meta { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px 20px; padding:16px 24px 0; margin:0; }
+.wrisk-app .native-meta > div { display:flex; flex-direction:column; gap:3px; }
+.wrisk-app .native-meta dt { font-size:10px; color:var(--muted); }
+.wrisk-app .native-meta dd { margin:0; font-size:12px; color:#c5d0de; overflow-wrap:anywhere; }
+.wrisk-app .native-warn { margin:12px 24px 0; font-size:12px; color:#d1bc94; }
+.wrisk-app .native-blocked { margin:12px 24px 0; padding:12px 14px; border-left:2px solid #7f6f4e; background:#241f17; color:#d1bc94; font-size:12px; }
+.wrisk-app .native-blocked p { margin:4px 0; }
+.wrisk-app .native-warnings { margin:12px 24px 0; padding-left:18px; font-size:11px; color:#a9b4c2; line-height:1.8; }
+.wrisk-app .native-confirm { margin:16px 24px 0; }
+.wrisk-app .native-preview > .button-primary { margin:14px 24px 0; }
+.wrisk-app .native-summary { margin:14px 24px 0; font-size:11px; color:var(--muted); }
+.wrisk-app .native-empty { margin:0; padding:36px 24px; color:var(--muted); font-size:12px; }
+.wrisk-app .native-cost-table input.cost-input { width:100%; min-height:30px; padding:4px 8px; font-size:12px; text-align:right; }
+.wrisk-app .cost-value.is-up { color:#e0a3a0; }
+.wrisk-app .cost-value.is-down { color:#8fc3ac; }
+.wrisk-app .native-page code { font-size:11px; }

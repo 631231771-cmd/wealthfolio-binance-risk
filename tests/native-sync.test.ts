@@ -1,0 +1,156 @@
+// 原生同步核心：映射、身份、去重、预览、写入与读回。全部为合成数据，不接触真实宿主。
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {spotSnapshot,spotRisk} from '../src/spot';
+import {buildNativePlan,nativeAccountKey,nativeAccountLabel,reconcilePlan} from '../src/native-sync';
+import {NativeSync,findBoundAccount,type NativeHostBridge,type NativeAccount} from '../src/native-host';
+import type {PortfolioState} from '../src/domain';
+
+const NOW=Date.parse('2026-10-19T10:00:00Z'),AT=new Date(NOW).toISOString(),DATE='2026-10-19';
+function valuation(balances:{asset:string;free:string}[],prices:Record<string,string>){
+  const {account,snapshot}=spotSnapshot({uid:1,accountType:'SPOT',balances:balances.map(b=>({...b,locked:'0'}))},'external',AT,AT);
+  for(const p of snapshot.positions)if(prices[p.asset.code])p.price={value:prices[p.asset.code],currency:'USDT',asOf:AT,source:'external:test'};
+  const state:PortfolioState={schemaVersion:1,accounts:[account],snapshots:{[account.id]:snapshot},statuses:{[account.id]:{state:'ready',attemptedAt:AT}}};
+  return {state,report:spotRisk(state,NOW)};
+}
+const KEY=nativeAccountKey('123456789');
+const base=()=>valuation([{asset:'USDT',free:'750'},{asset:'BTC',free:'0.01'},{asset:'ETH',free:'0.5'},{asset:'NOPAIR',free:'3'}],{BTC:'65000',ETH:'2500',USDT:'1'});
+
+test('映射：USDT 作为现金，其余为 CRYPTO/USDT 持仓，零数量与非法代码不写入',()=>{
+ const v=valuation([{asset:'USDT',free:'100'},{asset:'BTC',free:'0.5'},{asset:'ZERO',free:'0'},{asset:'币',free:'2'}],{BTC:'65000',USDT:'1'});
+ const plan=buildNativePlan({state:v.state,report:v.report,accountKey:KEY,baseCurrency:'USD',date:DATE});
+ assert.deepEqual(plan.cashBalances,{USDT:'100'});
+ assert.deepEqual(plan.holdings.map(h=>[h.symbol,h.quantity,h.currency,h.quoteCcy,h.instrumentType]),[['BTC','0.5','USDT','USDT','CRYPTO']]);
+ assert.ok(plan.warnings.some(w=>w.code==='UNSUPPORTED_SYMBOL'&&w.symbol==='币'));
+ assert.ok(plan.warnings.some(w=>w.code==='USDT_AS_CASH'));
+ assert.equal(plan.summary.positions,1);
+});
+test('账户身份：同UID稳定、不同UID不同，原始UID不进入计划',()=>{
+ assert.equal(nativeAccountKey('123456789'),KEY);
+ assert.notEqual(nativeAccountKey('987654321'),KEY);
+ assert.equal(nativeAccountLabel(KEY),`Binance Spot · ${KEY.slice(0,6)}`);
+ const plan=buildNativePlan({state:base().state,report:base().report,accountKey:KEY,baseCurrency:'USD',date:DATE});
+ assert.equal(plan.account.providerAccountId,KEY);
+ assert.ok(!JSON.stringify(plan).includes('123456789'));
+ assert.equal(plan.account.accountType,'CRYPTOCURRENCY');
+ assert.equal(plan.account.trackingMode,'HOLDINGS');
+});
+test('去重：优先 provider 绑定，其次确定性名称，不碰其他账户',()=>{
+ const bound:NativeAccount={id:'a1',name:'任意名',accountType:'CRYPTOCURRENCY',currency:'USDT',trackingMode:'HOLDINGS',provider:'binance-spot',providerAccountId:KEY};
+ assert.equal(findBoundAccount([bound],KEY)?.id,'a1');
+ const named:NativeAccount={id:'a2',name:nativeAccountLabel(KEY),accountType:'CRYPTOCURRENCY',currency:'USDT',trackingMode:'HOLDINGS'};
+ assert.equal(findBoundAccount([named],KEY)?.id,'a2');
+ const other:NativeAccount={id:'a3',name:'WRISK 模拟',accountType:'CRYPTOCURRENCY',currency:'USD',trackingMode:'HOLDINGS'};
+ assert.equal(findBoundAccount([other],KEY),null);
+});
+test('成本只写已知值，未知成本保留为缺省而不是 0',()=>{
+ const v=base();
+ const plan=buildNativePlan({state:v.state,report:v.report,accountKey:KEY,baseCurrency:'USD',date:DATE,costs:{BTC:{unitCost:'60000'},ETH:{unitCost:'0'}}});
+ const btc=plan.holdings.find(h=>h.symbol==='BTC')!,eth=plan.holdings.find(h=>h.symbol==='ETH')!;
+ assert.equal(btc.averageCost,'60000');
+ assert.equal(eth.averageCost,undefined);
+ assert.ok(plan.warnings.some(w=>w.code==='NO_COST'&&w.symbol==='ETH'));
+ assert.equal(plan.summary.costKnown,1);
+});
+test('指纹：数量或日期变化会改变，纯报价变化不进入指纹',()=>{
+ const a=buildNativePlan({state:base().state,report:base().report,accountKey:KEY,baseCurrency:'USD',date:DATE});
+ const b=buildNativePlan({state:base().state,report:base().report,accountKey:KEY,baseCurrency:'USD',date:'2026-10-20'});
+ assert.notEqual(a.fingerprint,b.fingerprint);
+ const changed=valuation([{asset:'USDT',free:'750'},{asset:'BTC',free:'0.02'},{asset:'ETH',free:'0.5'},{asset:'NOPAIR',free:'3'}],{BTC:'70000',ETH:'2500',USDT:'1'});
+ const c=buildNativePlan({state:changed.state,report:changed.report,accountKey:KEY,baseCurrency:'USD',date:DATE});
+ assert.notEqual(a.fingerprint,c.fingerprint);
+ // 仅报价变化：数量与成本不变，预览不应失效
+ const repriced=valuation([{asset:'USDT',free:'750'},{asset:'BTC',free:'0.01'},{asset:'ETH',free:'0.5'},{asset:'NOPAIR',free:'3'}],{BTC:'71000',ETH:'2600',USDT:'1'});
+ const d=buildNativePlan({state:repriced.state,report:repriced.report,accountKey:KEY,baseCurrency:'USD',date:DATE});
+ assert.equal(a.fingerprint,d.fingerprint);
+});
+test('对账：浮点容差、缺失与多余都能区分',()=>{
+ const plan=buildNativePlan({state:base().state,report:base().report,accountKey:KEY,baseCurrency:'USD',date:DATE});
+ const ok=reconcilePlan(plan,[{symbol:'BTC',quantity:0.01},{symbol:'ETH',quantity:0.5},{symbol:'NOPAIR',quantity:3}]);
+ assert.equal(ok.ok,true);assert.equal(ok.matched,3);
+ const bad=reconcilePlan(plan,[{symbol:'BTC',quantity:0.02},{symbol:'NOPAIR',quantity:3}]);
+ assert.equal(bad.ok,false);assert.deepEqual(bad.mismatched.map(m=>m.symbol),['BTC']);assert.deepEqual(bad.missing,['ETH']);
+ const extra=reconcilePlan(plan,[{symbol:'BTC',quantity:0.01},{symbol:'ETH',quantity:0.5},{symbol:'NOPAIR',quantity:3},{symbol:'DOGE',quantity:1}]);
+ assert.deepEqual(extra.extra,['DOGE']);assert.equal(extra.ok,true);
+});
+
+function harness(overrides:{rate?:number|null;base?:string;existing?:NativeAccount[];manual?:boolean;quoteFail?:boolean}={}){
+ const accounts:NativeAccount[]=[...(overrides.existing??[])];
+ const saves:{accountId:string;holdings:any[];cash:Record<string,string>;date:string}[]=[];
+ const quotes:string[]=[];
+ let checkCalls=0,createCalls=0;
+ const bridge:NativeHostBridge={
+  listAccounts:async()=>accounts,
+  createAccount:async input=>{createCalls++;const a:NativeAccount={id:'acc-new',...input};accounts.push(a);return a;},
+  checkImport:async()=>{checkCalls++;return {existingDates:[],symbols:[],validationErrors:[]};},
+  saveSnapshot:async(accountId,holdings,cash,date)=>{saves.push({accountId,holdings,cash,date});},
+  listSnapshots:async()=>[{snapshotDate:DATE,positionCount:saves.at(-1)?.holdings.length??0,cashCurrencyCount:Object.keys(saves.at(-1)?.cash??{}).length}],
+  getByDate:async()=>(saves.at(-1)?.holdings??[]).map(h=>({symbol:h.symbol,quantity:Number(h.quantity),assetId:'asset-'+h.symbol,quoteMode:overrides.manual?'MANUAL':'MARKET'})),
+  updateQuote:async(assetId)=>{if(overrides.quoteFail)throw new Error('x');quotes.push(assetId);},
+  baseCurrency:async()=>overrides.base??'USD',
+  usdtRate:async()=>overrides.rate===undefined?0.9998:overrides.rate,
+  today:()=>DATE
+ };
+ return {bridge,saves,quotes,get createCalls(){return createCalls;},get checkCalls(){return checkCalls;}};
+}
+test('预览：无绑定账户时建议创建；USDT→基础货币无汇率时阻止写入',async()=>{
+ const v=base();
+ const blocked=await new NativeSync(harness({rate:null}).bridge).preview(v,KEY,{});
+ assert.equal(blocked.action,'create');
+ assert.deepEqual(blocked.blocked,['NO_USDT_RATE']);
+ const ok=await new NativeSync(harness().bridge).preview(v,KEY,{});
+ assert.deepEqual(ok.blocked,[]);assert.equal(ok.rate,0.9998);
+ assert.equal(ok.plan.holdings.length,3); // BTC、ETH 与缺价的 NOPAIR 都要保留
+});
+test('预览：已绑定账户会做符号预检，并把平均成本映射为 avgCost',async()=>{
+ const existing:NativeAccount={id:'acc-1',name:'Binance Spot',accountType:'CRYPTOCURRENCY',currency:'USDT',trackingMode:'HOLDINGS',provider:'binance-spot',providerAccountId:KEY};
+ const h=harness({existing:[existing]});
+ let captured:any;
+ h.bridge.checkImport=async(_id,snaps)=>{captured=snaps;return {existingDates:[DATE],symbols:[{symbol:'BTC',found:true,assetId:'asset-BTC'}],validationErrors:[]};};
+ const preview=await new NativeSync(h.bridge).preview(base(),KEY,{BTC:{unitCost:'60000'}});
+ assert.equal(preview.action,'bind');
+ assert.deepEqual(preview.existingDates,[DATE]);
+ assert.equal(captured[0].positions.find((p:any)=>p.symbol==='BTC').avgCost,'60000');
+});
+test('写入：必须显式确认；过期预览被拒绝；成功后读回对账并写报价',async()=>{
+ const h=harness();const sync=new NativeSync(h.bridge),v=base();
+ const preview=await sync.preview(v,KEY,{});
+ await assert.rejects(sync.apply(v,KEY,{},preview,'NOPE' as never),(e:any)=>e.code==='NOT_CONFIRMED');
+ const stale=await sync.preview(v,KEY,{});
+ const changed=valuation([{asset:'USDT',free:'750'},{asset:'BTC',free:'0.02'},{asset:'ETH',free:'0.5'},{asset:'NOPAIR',free:'3'}],{BTC:'65000',ETH:'2500',USDT:'1'});
+ await assert.rejects(sync.apply(changed,KEY,{},stale,'WRITE'),(e:any)=>e.code==='PREVIEW_STALE');
+ const result=await sync.apply(v,KEY,{},preview,'WRITE');
+ assert.equal(result.created,true);assert.equal(result.accountId,'acc-new');
+ assert.equal(result.reconcile.ok,true);
+ assert.equal(result.quotesPushed,2);
+ assert.equal(h.saves.length,1);
+ assert.equal(h.saves[0].date,DATE);
+ assert.deepEqual(h.saves[0].cash,{USDT:'750'});
+});
+test('重复同步：第二次绑定同一账户，不重复创建',async()=>{
+ const h=harness();const sync=new NativeSync(h.bridge),v=base();
+ const first=await sync.preview(v,KEY,{});await sync.apply(v,KEY,{},first,'WRITE');
+ const second=await sync.preview(v,KEY,{});
+ assert.equal(second.action,'bind');
+ const result=await sync.apply(v,KEY,{},second,'WRITE');
+ assert.equal(result.created,false);
+ assert.equal(h.createCalls,1);
+ assert.equal(h.saves.length,2);
+ assert.equal(h.saves[1].accountId,h.saves[0].accountId);
+});
+test('MANUAL 资产不覆盖报价；报价失败不回滚持仓',async()=>{
+ const manual=harness({manual:true});const v=base();
+ const p1=await new NativeSync(manual.bridge).preview(v,KEY,{});
+ const r1=await new NativeSync(manual.bridge).apply(v,KEY,{},p1,'WRITE');
+ assert.equal(r1.quotesPushed,0);
+ const failing=harness({quoteFail:true});
+ const p2=await new NativeSync(failing.bridge).preview(v,KEY,{});
+ const r2=await new NativeSync(failing.bridge).apply(v,KEY,{},p2,'WRITE');
+ assert.equal(r2.quotesPushed,0);assert.equal(r2.quoteFailures,2);
+ assert.equal(r2.reconcile.ok,true);
+ assert.ok(r2.warnings.some(w=>w.includes('报价写入失败')));
+});
+test('宿主不可用时预览直接报固定错误，不伪造成功',async()=>{
+ const bridge={listAccounts:async()=>{throw new Error('boom');}} as unknown as NativeHostBridge;
+ await assert.rejects(new NativeSync(bridge).preview(base(),KEY,{}),(e:any)=>e.code==='HOST_UNAVAILABLE');
+});
