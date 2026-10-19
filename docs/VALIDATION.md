@@ -479,3 +479,13 @@ main/v0.1.3 保存基线提交 91f3432；本轮 feature/spot-readonly-offline �
 - ZIP `artifacts/wealthfolio-binance-risk-0.3.0.zip`，SHA256 `075d7b4794ad5d685da0dd11a86ff4db5630f91d1557689e0bc10bada44a2a86`；回执 `BUILD-RECEIPT-0.3.0.json`（trackedChanges=false，源码指纹 `ed9f68e3…`）。
 - 虚构宿主端到端（Chrome headless 加载本地预览，内存 host）：检测能力 → 预览（5 持仓 + USDT 现金）→ 勾选 → 写入 → 读回 5 项一致 → 报价 5 项。**未对真实资料库写入，未发送任何私人请求。**
 - 未验证：真实宿主的 accounts/snapshots/quotes 行为、USDT→基础货币汇率是否已存在、原生仪表盘的实际显示与总额。
+
+## v0.3.1 原生集成深度验收（2026-10-19）
+
+- 基线 `4dc3df1`；提交 `d9ecdfd`；工作树 `F:\Code\wrisk-ds`，分支 review/ds-0.2.1。
+- 源码复核（v3.10.0 `holdings_valuation_service.rs`）：缺报价→市值 0；缺汇率→`get_fx_rate_or_fallback` 静默 1.0；无报价过期判断；未实现盈亏 = 市值 − Position 成本；现金收益恒 0。
+- 新增：成本缺失默认阻断 + 显式允许；账户类型门槛；账户绑定持久化；读回失败返回"已提交·未读回"；报价失败按 0 估值提示；报价全局影响提示；预览显示预计基础货币总额。
+- **249 项测试通过**（+5：成本门槛、账户类型、读回失败、改名绑定、保存失败重试），tsc 0 错；完整 `npm run verify` 通过。
+- ZIP `artifacts/wealthfolio-binance-risk-0.3.1.zip`，SHA256 `1e099c60dec38f3b5d4f137eeb34dd1fb64fb7f60356f6a3f1bc6c4a2d8e2b68`；回执 `BUILD-RECEIPT-0.3.1.json`（指纹 `b9422eef…`，trackedChanges=false）。
+- 虚构预览三态：默认阻断（成本未知）、显式允许后预览、写入后读回 5 项一致。**未对真实资料库写入。**
+- 未验证：真实客户端安装、原生账户总额与成本/收益显示、汇率缺失时宿主的实际 1.0 回退。
