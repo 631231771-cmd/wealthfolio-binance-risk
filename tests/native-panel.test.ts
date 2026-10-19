@@ -23,7 +23,7 @@ const reader=(v:ReturnType<typeof value>)=>({valued:()=>v,getAccountKey:()=>KEY}
 const host=()=>({
  listAccounts:async()=>[],createAccount:async()=>{throw new Error('no');},checkImport:async()=>({existingDates:[],symbols:[],validationErrors:[]}),
  saveSnapshot:async()=>{},listSnapshots:async()=>[],getByDate:async()=>[],updateQuote:async()=>{},
- baseCurrency:async()=>'USD',usdtRate:async()=>0.9998,today:()=>'2026-10-19'
+ baseCurrency:async()=>'USD',usdtRate:async()=>0.9998,today:()=>'2026-10-19',readBinding:async()=>null,writeBinding:async()=>{}
 } as NativeHostBridge);
 
 test('无宿主时明确说明原生写入不可用，不展示可点击的写入按钮',()=>{

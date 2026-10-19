@@ -17,7 +17,9 @@ const errorText:Record<string,string>={
 };
 const blockedText:Record<string,string>={
   NO_USDT_RATE:'Wealthfolio 没有可用的 USDT → 基础货币汇率。为避免把错误总额写入账本，已停止写入；请先在原生设置中补齐汇率。',
-  EMPTY_PORTFOLIO:'当前没有可导入的持仓或现金。'
+  EMPTY_PORTFOLIO:'当前没有可导入的持仓或现金。',
+  MISSING_COST:'需要先处理成本缺失，或显式允许仅导入数量。',
+  ACCOUNT_MISMATCH:'绑定账户不是 CRYPTOCURRENCY · HOLDINGS，已停止写入。'
 };
 
 export function NativePanel({reader,host,onCosts}:{reader:DirectSpot;host?:NativeHostBridge;onCosts?:(book:CostBook)=>void}){
@@ -27,6 +29,7 @@ export function NativePanel({reader,host,onCosts}:{reader:DirectSpot;host?:Nativ
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
   const [confirmed,setConfirmed]=useState(false);
+  const [allowUnknownCost,setAllowUnknownCost]=useState(false);
   const [draft,setDraft]=useState<Record<string,string>>({});
   const sync=useMemo(()=>host?new NativeSync(host):null,[host]);
   const {state,report}=reader.valued();
@@ -48,7 +51,7 @@ export function NativePanel({reader,host,onCosts}:{reader:DirectSpot;host?:Nativ
       <p className="native-lead">把当前 Binance Spot 持仓写入一个独立的 <strong>CRYPTOCURRENCY · HOLDINGS</strong> 原生账户。不会修改其他账户、历史模拟账户或已有资产的成本。</p>
       <div className="native-actions">
         <button disabled={busy||!accountKey} onClick={()=>void run(async()=>{const next=await sync.probe(accountKey!);setProbe(next);setMessage(next.available?'':'宿主不可用，未做任何写入。');})}>检测宿主能力</button>
-        <button className="button-primary" disabled={busy||!accountKey} onClick={()=>void run(async()=>{const next=await sync.preview(reader.valued(),accountKey!,book);setPreview(next);setResult(null);setConfirmed(false);setProbe({available:true,baseCurrency:next.plan.baseCurrency,usdtRate:next.rate,accountCount:0,bound:next.bound,reasons:next.blocked});})}>生成导入预览</button>
+        <button className="button-primary" disabled={busy||!accountKey} onClick={()=>void run(async()=>{const next=await sync.preview(reader.valued(),accountKey!,book,{allowUnknownCost});setPreview(next);setResult(null);setConfirmed(false);setProbe({available:true,baseCurrency:next.plan.baseCurrency,usdtRate:next.rate,accountCount:0,bound:next.bound,reasons:next.blocked});})}>生成导入预览</button>
       </div>
       {!accountKey&&<p className="native-warn">请先完成本人确认的余额查询；账户绑定使用不可逆短哈希，不保存原始 UID。</p>}
       {probe&&<dl className="native-meta">
@@ -86,20 +89,26 @@ export function NativePanel({reader,host,onCosts}:{reader:DirectSpot;host?:Nativ
         <div><dt>快照日期</dt><dd>{preview.plan.date}{preview.existingDates.includes(preview.plan.date)?'（已存在，将覆盖当日）':''}</dd></div>
         <div><dt>持仓 / 现金</dt><dd>{preview.plan.summary.positions} 项 · USDT {money(preview.plan.summary.cash)}</dd></div>
         <div><dt>已定价小计</dt><dd>{money(preview.plan.summary.valued)} USDT</dd></div>
+        {preview.rate!==null&&preview.plan.baseCurrency!=='USDT'&&preview.plan.summary.valued&&<div><dt>预计基础货币</dt><dd>≈ {money((Number(preview.plan.summary.valued)*preview.rate).toFixed(2))} {preview.plan.baseCurrency}</dd></div>}
       </dl>
       {preview.blocked.length>0&&<div className="native-blocked" role="alert">{preview.blocked.map(code=><p key={code}>{blockedText[code]??code}</p>)}</div>}
+      {preview.costUnknownSymbols.length>0&&<div className="native-cost-warning">
+        <p>成本未知：{preview.costUnknownSymbols.join('、')}。宿主会把缺失成本当作 0，这些资产的未实现盈亏将等于全部市值。</p>
+        <label className="check-label"><input type="checkbox" checked={allowUnknownCost} onChange={e=>{setAllowUnknownCost(e.target.checked);setPreview(null);setConfirmed(false);}}/>允许这些资产仅导入数量；原生盈亏对它们不可用。</label>
+      </div>}
       {preview.warnings.length>0&&<ul className="native-warnings">{preview.warnings.map((w,i)=><li key={i}>{w.symbol?`${w.symbol} · `:''}{w.detail}</li>)}</ul>}
       {preview.symbols.length>0&&<p className="native-summary">宿主预检：{preview.symbols.filter(s=>s.found).length} / {preview.symbols.length} 个符号已识别。</p>}
+      <p className="native-summary">原生估值依赖报价与汇率：未写入报价的资产在原生页面按 0 计；报价按资产全局写入，可能影响其他账户中同一资产的估值；MANUAL 资产会跳过。USDT→基础货币由宿主换算，可能与插件显示不同。</p>
       <label className="check-label native-confirm"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>我已核对账户、资产、数量、成本与快照日期，确认写入这个原生账户。</label>
       <button className="button-primary" disabled={busy||!confirmed||preview.blocked.length>0} onClick={()=>void run(async()=>{const next=await sync.apply(reader.valued(),accountKey!,book,preview,'WRITE');setResult(next);setPreview(null);setConfirmed(false);setMessage('');})}>写入原生账户</button>
     </section>}
 
     {result&&<section className="portfolio-card">
-      <div className="section-heading"><h2>写入结果</h2><span>{result.reconcile.ok?'读回一致':'需要核对'}</span></div>
+      <div className="section-heading"><h2>写入结果</h2><span>{result.readback==='failed'?'已提交 · 未读回':result.reconcile?.ok?'读回一致':'需要核对'}</span></div>
       <dl className="native-meta">
         <div><dt>账户</dt><dd>{result.accountId.slice(0,8)} · {result.created?'本次创建':'已绑定'}</dd></div>
         <div><dt>快照</dt><dd>{result.snapshotDate} · {result.positionCount} 项持仓 · {result.cashCurrencyCount} 种现金</dd></div>
-        <div><dt>读回对账</dt><dd>{result.reconcile.matched} 项一致{result.reconcile.mismatched.length?` · ${result.reconcile.mismatched.length} 项不一致`:''}{result.reconcile.missing.length?` · 缺失 ${result.reconcile.missing.join('、')}`:''}</dd></div>
+        <div><dt>读回对账</dt><dd>{result.readback==='failed'?'未完成':`${result.reconcile?.matched??0} 项一致${result.reconcile?.mismatched.length?` · ${result.reconcile.mismatched.length} 项不一致`:''}${result.reconcile?.missing.length?` · 缺失 ${result.reconcile.missing.join('、')}`:''}`}</dd></div>
         <div><dt>报价</dt><dd>已写 {result.quotesPushed} 项{result.quoteFailures?` · 失败 ${result.quoteFailures} 项`:''}</dd></div>
       </dl>
       {result.warnings.length>0&&<ul className="native-warnings">{result.warnings.map((w,i)=><li key={i}>{w}</li>)}</ul>}

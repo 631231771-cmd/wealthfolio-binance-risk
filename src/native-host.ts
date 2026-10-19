@@ -29,11 +29,14 @@ export interface NativeHostBridge {
   baseCurrency():Promise<string>;
   usdtRate(to:string,date:string):Promise<number|null>;
   today():string;
+  readBinding(key:string):Promise<string|null>;
+  writeBinding(key:string,accountId:string):Promise<void>;
 }
-export type NativeErrorCode='NOT_CONFIRMED'|'PREVIEW_STALE'|'BLOCKED'|'HOST_UNAVAILABLE'|'ACCOUNT_CREATE_FAILED'|'SNAPSHOT_SAVE_FAILED'|'READBACK_FAILED'|'UID_INVALID';
+export type NativeErrorCode='NOT_CONFIRMED'|'PREVIEW_STALE'|'BLOCKED'|'HOST_UNAVAILABLE'|'ACCOUNT_CREATE_FAILED'|'SNAPSHOT_SAVE_FAILED'|'UID_INVALID';
 export class NativeSyncError extends Error {
   constructor(readonly code:NativeErrorCode,readonly detail?:string){super(code);}
 }
+export interface NativeOptions {allowUnknownCost?:boolean}
 export interface NativeProbe {
   available:boolean; baseCurrency:string; usdtRate:number|null; accountCount:number;
   bound:NativeAccount|null; reasons:string[];
@@ -42,42 +45,50 @@ export interface NativePreview {
   plan:NativePlan; bound:NativeAccount|null; action:'create'|'bind'; rate:number|null;
   existingDates:string[]; symbols:NativeCheck['symbols']; validationErrors:string[];
   blocked:string[]; warnings:NativeWarning[];
+  allowUnknownCost:boolean; costUnknownSymbols:string[];
 }
 export interface NativeResult {
   accountId:string; created:boolean; snapshotDate:string;
   positionCount:number; cashCurrencyCount:number;
-  reconcile:ReturnType<typeof reconcilePlan>;
+  readback:'ok'|'failed';
+  reconcile:ReturnType<typeof reconcilePlan>|null;
   quotesPushed:number; quoteFailures:number; warnings:string[];
 }
 const call=<T>(fn:()=>Promise<T>):Promise<T>=>Promise.resolve().then(fn);
-export function findBoundAccount(accounts:NativeAccount[],key:string):NativeAccount|null{
+export function findBoundAccount(accounts:NativeAccount[],key:string,boundId?:string|null):NativeAccount|null{
+  // 顺序：持久绑定 → provider 标识 → 确定性名称。用户改名后仍能靠前两者找回。
+  if(boundId){const byId=accounts.find(a=>a.id===boundId);if(byId)return byId;}
   return accounts.find(a=>a.provider===NATIVE_PROVIDER&&a.providerAccountId===key)
     ?? accounts.find(a=>a.accountType==='CRYPTOCURRENCY'&&a.name===nativeAccountLabel(key))
     ?? null;
 }
+function accountMismatch(account:NativeAccount){return account.accountType!=='CRYPTOCURRENCY'||account.trackingMode!=='HOLDINGS';}
 
 export class NativeSync {
   constructor(private host:NativeHostBridge){}
+  private async boundId(accountKey:string){
+    try{return await this.host.readBinding(accountKey);}catch{return null;}
+  }
   async probe(accountKey:string):Promise<NativeProbe>{
     try{
       const [accounts,baseCurrency]=await Promise.all([call(()=>this.host.listAccounts()),call(()=>this.host.baseCurrency())]);
       const date=this.host.today();
       const usdtRate=baseCurrency===NATIVE_CURRENCY?1:await this.host.usdtRate(baseCurrency,date);
-      const bound=findBoundAccount(accounts,accountKey);
+      const bound=findBoundAccount(accounts,accountKey,await this.boundId(accountKey));
       return {available:true,baseCurrency,usdtRate,accountCount:accounts.length,bound,
         reasons:baseCurrency!==NATIVE_CURRENCY&&usdtRate===null?['NO_USDT_RATE']:[]};
-    }catch(error){
+    }catch{
       return {available:false,baseCurrency:'',usdtRate:null,accountCount:0,bound:null,reasons:['HOST_UNAVAILABLE']};
     }
   }
-  async preview(value:Valuation,accountKey:string,costs:CostBook):Promise<NativePreview>{
+  async preview(value:Valuation,accountKey:string,costs:CostBook,options:NativeOptions={}):Promise<NativePreview>{
     let accounts:NativeAccount[],baseCurrency:string;
     try{[accounts,baseCurrency]=await Promise.all([call(()=>this.host.listAccounts()),call(()=>this.host.baseCurrency())]);}
     catch{throw new NativeSyncError('HOST_UNAVAILABLE');}
     const date=this.host.today();
     const rate=baseCurrency===NATIVE_CURRENCY?1:await this.host.usdtRate(baseCurrency,date);
     const plan=buildNativePlan({state:value.state,report:value.report,accountKey,baseCurrency,date,costs});
-    const bound=findBoundAccount(accounts,accountKey);
+    const bound=findBoundAccount(accounts,accountKey,await this.boundId(accountKey));
     let existingDates:string[]=[],symbols:NativeCheck['symbols']=[],validationErrors:string[]=[];
     if(bound){
       try{
@@ -87,8 +98,11 @@ export class NativeSync {
     }
     const blocked:string[]=[];
     if(baseCurrency!==NATIVE_CURRENCY&&rate===null)blocked.push('NO_USDT_RATE');
+    if(bound&&accountMismatch(bound))blocked.push('ACCOUNT_MISMATCH');
+    if(plan.summary.costUnknownSymbols.length&&!options.allowUnknownCost)blocked.push('MISSING_COST');
     if(!plan.holdings.length&&!Object.keys(plan.cashBalances).length)blocked.push('EMPTY_PORTFOLIO');
-    return {plan,bound,action:bound?'bind':'create',rate,existingDates,symbols,validationErrors,blocked,warnings:plan.warnings};
+    return {plan,bound,action:bound?'bind':'create',rate,existingDates,symbols,validationErrors,blocked,warnings:plan.warnings,
+      allowUnknownCost:!!options.allowUnknownCost,costUnknownSymbols:plan.summary.costUnknownSymbols};
   }
   // 写入必须显式确认，且预览指纹必须与当前持仓一致，避免用过期预览写账本。
   async apply(value:Valuation,accountKey:string,costs:CostBook,preview:NativePreview,confirmation:'WRITE'):Promise<NativeResult>{
@@ -98,46 +112,54 @@ export class NativeSync {
     if(current.fingerprint!==preview.plan.fingerprint)throw new NativeSyncError('PREVIEW_STALE');
     const warnings:string[]=[];
     let account=preview.bound,created=false;
+    if(account&&accountMismatch(account))throw new NativeSyncError('BLOCKED','ACCOUNT_MISMATCH');
     if(!account){
       try{account=await this.host.createAccount(current.account);created=true;}
       catch{throw new NativeSyncError('ACCOUNT_CREATE_FAILED');}
       if(!account?.id){warnings.push('账户已创建但未返回 id，已停止写入');throw new NativeSyncError('ACCOUNT_CREATE_FAILED');}
+      try{await this.host.writeBinding(accountKey,account.id);}catch{warnings.push('账户绑定未持久化，下次可能按名称匹配');}
     }
     try{await this.host.saveSnapshot(account.id,current.holdings,current.cashBalances,current.date);}
     catch{throw new NativeSyncError('SNAPSHOT_SAVE_FAILED');}
-    let rows:NativeSnapshotRow[]=[],actual:NativeActualRow[]=[];
+    let rows:NativeSnapshotRow[]=[],actual:NativeActualRow[]=[],readback:'ok'|'failed'='ok';
     try{
-      [rows,actual]=await Promise.all([call(()=>this.host.listSnapshots(account.id,current.date,current.date)),call(()=>this.host.getByDate(account.id,current.date))]);
-    }catch{throw new NativeSyncError('READBACK_FAILED');}
-    const reconcile=reconcilePlan(current,actual.map(r=>({symbol:r.symbol,quantity:r.quantity})));
-    if(!reconcile.ok)warnings.push('读回数量与预期不一致');
-    const snap=rows.find(r=>r.snapshotDate===current.date);
-    if(!snap)warnings.push('读回未找到当日快照');
-    // 报价是尽力而为：只写非 MANUAL 资产，失败不回滚已写入的持仓。
-    let quotesPushed=0,quoteFailures=0;
-    const prices=new Map<string,{value:string;asOf:string}>();
-    for(const s of Object.values(value.state.snapshots))for(const p of s.positions)if(p.price)prices.set(p.asset.code,{value:p.price.value,asOf:p.price.asOf});
-    for(const row of actual){
-      const price=prices.get(row.symbol);
-      if(!row.assetId||!price||row.quoteMode==='MANUAL')continue;
-      let close:number;
-      try{close=Number(nonnegative(price.value).toFixed(8));}catch{continue;}
-      if(!Number.isFinite(close)||close<=0)continue;
-      const timestamp=new Date(price.asOf).toISOString();
-      try{
-        await this.host.updateQuote(row.assetId,{id:`${row.assetId}_${current.date}_BINANCE`,createdAt:new Date().toISOString(),dataSource:'BINANCE',
-          timestamp,assetId:row.assetId,open:close,high:close,low:close,volume:0,close,adjclose:close,currency:NATIVE_CURRENCY});
-        quotesPushed++;
-      }catch{quoteFailures++;}
+      [rows,actual]=await Promise.all([call(()=>this.host.listSnapshots(account!.id,current.date,current.date)),call(()=>this.host.getByDate(account!.id,current.date))]);
+    }catch{
+      // 快照可能已经写入；不重试、不重建账户，交给本人核对。
+      readback='failed';warnings.push('快照已提交，但读回失败；请到原生账户核对，不要重复写入。');
     }
-    if(quoteFailures)warnings.push(`${quoteFailures} 项报价写入失败，持仓已保留`);
+    const reconcile=readback==='ok'?reconcilePlan(current,actual.map(r=>({symbol:r.symbol,quantity:r.quantity}))):null;
+    if(reconcile&&!reconcile.ok)warnings.push('读回数量与预期不一致');
+    const snap=rows.find(r=>r.snapshotDate===current.date);
+    if(readback==='ok'&&!snap)warnings.push('读回未找到当日快照');
+    // 报价是尽力而为：只写非 MANUAL 资产；失败不回滚已写入的持仓，但必须明确后果。
+    let quotesPushed=0,quoteFailures=0;
+    if(readback==='ok'){
+      const prices=new Map<string,{value:string;asOf:string}>();
+      for(const s of Object.values(value.state.snapshots))for(const p of s.positions)if(p.price)prices.set(p.asset.code,{value:p.price.value,asOf:p.price.asOf});
+      for(const row of actual){
+        const price=prices.get(row.symbol);
+        if(!row.assetId||!price||row.quoteMode==='MANUAL')continue;
+        let close:number;
+        try{close=Number(nonnegative(price.value).toFixed(8));}catch{continue;}
+        if(!Number.isFinite(close)||close<=0)continue;
+        const timestamp=new Date(price.asOf).toISOString();
+        try{
+          await this.host.updateQuote(row.assetId,{id:`${row.assetId}_${current.date}_BINANCE`,createdAt:new Date().toISOString(),dataSource:'BINANCE',
+            timestamp,assetId:row.assetId,open:close,high:close,low:close,volume:0,close,adjclose:close,currency:NATIVE_CURRENCY});
+          quotesPushed++;
+        }catch{quoteFailures++;}
+      }
+      if(quoteFailures)warnings.push(`${quoteFailures} 项报价写入失败；原生页面会把这些资产按 0 估值`);
+    }
     return {accountId:account.id,created,snapshotDate:current.date,positionCount:snap?.positionCount??actual.length,
-      cashCurrencyCount:snap?.cashCurrencyCount??Object.keys(current.cashBalances).length,reconcile,quotesPushed,quoteFailures,warnings};
+      cashCurrencyCount:snap?.cashCurrencyCount??Object.keys(current.cashBalances).length,readback,reconcile,quotesPushed,quoteFailures,warnings};
   }
 }
 
 export function createHostBridge(api:AddonContext['api']):NativeHostBridge{
   const today=()=>{const d=new Date(),p=(n:number)=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;};
+  const bindingKey=(key:string)=>`native-account-${key}`;
   return {
     listAccounts:async()=>(await api.accounts.getAll()).map(a=>({id:a.id,name:a.name,accountType:a.accountType,currency:a.currency,trackingMode:a.trackingMode,provider:a.provider,providerAccountId:a.providerAccountId})),
     createAccount:async input=>{const a=await api.accounts.create(input);return {id:a.id,name:a.name,accountType:a.accountType,currency:a.currency,trackingMode:a.trackingMode,provider:a.provider,providerAccountId:a.providerAccountId};},
@@ -148,6 +170,8 @@ export function createHostBridge(api:AddonContext['api']):NativeHostBridge{
     updateQuote:(assetId,quote)=>api.quotes.update(assetId,quote),
     baseCurrency:async()=>(await api.settings.get()).baseCurrency,
     usdtRate:async(to,date)=>{const [row]=await api.exchangeRates.getRatesForDates([{fromCurrency:NATIVE_CURRENCY,toCurrency:to,date}]);return row?.rate??null;},
-    today
+    today,
+    readBinding:async key=>{try{return await api.storage.get(bindingKey(key));}catch{return null;}},
+    writeBinding:async(key,accountId)=>{await api.storage.set(bindingKey(key),accountId);}
   };
 }

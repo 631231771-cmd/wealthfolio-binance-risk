@@ -78,27 +78,29 @@ function harness(overrides:{rate?:number|null;base?:string;existing?:NativeAccou
  const accounts:NativeAccount[]=[...(overrides.existing??[])];
  const saves:{accountId:string;holdings:any[];cash:Record<string,string>;date:string}[]=[];
  const quotes:string[]=[];
- let checkCalls=0,createCalls=0;
+ let checkCalls=0,createCalls=0,boundId:string|null=null,saveFail=false,readFail=false;
  const bridge:NativeHostBridge={
   listAccounts:async()=>accounts,
   createAccount:async input=>{createCalls++;const a:NativeAccount={id:'acc-new',...input};accounts.push(a);return a;},
   checkImport:async()=>{checkCalls++;return {existingDates:[],symbols:[],validationErrors:[]};},
-  saveSnapshot:async(accountId,holdings,cash,date)=>{saves.push({accountId,holdings,cash,date});},
+  saveSnapshot:async(accountId,holdings,cash,date)=>{if(saveFail){saveFail=false;throw new Error('save');}saves.push({accountId,holdings,cash,date});},
   listSnapshots:async()=>[{snapshotDate:DATE,positionCount:saves.at(-1)?.holdings.length??0,cashCurrencyCount:Object.keys(saves.at(-1)?.cash??{}).length}],
-  getByDate:async()=>(saves.at(-1)?.holdings??[]).map(h=>({symbol:h.symbol,quantity:Number(h.quantity),assetId:'asset-'+h.symbol,quoteMode:overrides.manual?'MANUAL':'MARKET'})),
+  getByDate:async()=>{if(readFail){readFail=false;throw new Error('read');}return (saves.at(-1)?.holdings??[]).map(h=>({symbol:h.symbol,quantity:Number(h.quantity),assetId:'asset-'+h.symbol,quoteMode:overrides.manual?'MANUAL':'MARKET'}));},
   updateQuote:async(assetId)=>{if(overrides.quoteFail)throw new Error('x');quotes.push(assetId);},
   baseCurrency:async()=>overrides.base??'USD',
   usdtRate:async()=>overrides.rate===undefined?0.9998:overrides.rate,
-  today:()=>DATE
+  today:()=>DATE,
+  readBinding:async()=>boundId,
+  writeBinding:async(_key,id)=>{boundId=id;}
  };
- return {bridge,saves,quotes,get createCalls(){return createCalls;},get checkCalls(){return checkCalls;}};
+ return {bridge,saves,quotes,accounts,get createCalls(){return createCalls;},get checkCalls(){return checkCalls;},failNextSave:()=>{saveFail=true;},failNextRead:()=>{readFail=true;}};
 }
 test('预览：无绑定账户时建议创建；USDT→基础货币无汇率时阻止写入',async()=>{
  const v=base();
- const blocked=await new NativeSync(harness({rate:null}).bridge).preview(v,KEY,{});
+ const blocked=await new NativeSync(harness({rate:null}).bridge).preview(v,KEY,{},{allowUnknownCost:true});
  assert.equal(blocked.action,'create');
  assert.deepEqual(blocked.blocked,['NO_USDT_RATE']);
- const ok=await new NativeSync(harness().bridge).preview(v,KEY,{});
+ const ok=await new NativeSync(harness().bridge).preview(v,KEY,{},{allowUnknownCost:true});
  assert.deepEqual(ok.blocked,[]);assert.equal(ok.rate,0.9998);
  assert.equal(ok.plan.holdings.length,3); // BTC、ETH 与缺价的 NOPAIR 都要保留
 });
@@ -114,14 +116,14 @@ test('预览：已绑定账户会做符号预检，并把平均成本映射为 a
 });
 test('写入：必须显式确认；过期预览被拒绝；成功后读回对账并写报价',async()=>{
  const h=harness();const sync=new NativeSync(h.bridge),v=base();
- const preview=await sync.preview(v,KEY,{});
+ const preview=await sync.preview(v,KEY,{},{allowUnknownCost:true});
  await assert.rejects(sync.apply(v,KEY,{},preview,'NOPE' as never),(e:any)=>e.code==='NOT_CONFIRMED');
- const stale=await sync.preview(v,KEY,{});
+ const stale=await sync.preview(v,KEY,{},{allowUnknownCost:true});
  const changed=valuation([{asset:'USDT',free:'750'},{asset:'BTC',free:'0.02'},{asset:'ETH',free:'0.5'},{asset:'NOPAIR',free:'3'}],{BTC:'65000',ETH:'2500',USDT:'1'});
  await assert.rejects(sync.apply(changed,KEY,{},stale,'WRITE'),(e:any)=>e.code==='PREVIEW_STALE');
  const result=await sync.apply(v,KEY,{},preview,'WRITE');
  assert.equal(result.created,true);assert.equal(result.accountId,'acc-new');
- assert.equal(result.reconcile.ok,true);
+ assert.equal(result.reconcile?.ok,true);
  assert.equal(result.quotesPushed,2);
  assert.equal(h.saves.length,1);
  assert.equal(h.saves[0].date,DATE);
@@ -129,8 +131,8 @@ test('写入：必须显式确认；过期预览被拒绝；成功后读回对�
 });
 test('重复同步：第二次绑定同一账户，不重复创建',async()=>{
  const h=harness();const sync=new NativeSync(h.bridge),v=base();
- const first=await sync.preview(v,KEY,{});await sync.apply(v,KEY,{},first,'WRITE');
- const second=await sync.preview(v,KEY,{});
+ const first=await sync.preview(v,KEY,{},{allowUnknownCost:true});await sync.apply(v,KEY,{},first,'WRITE');
+ const second=await sync.preview(v,KEY,{},{allowUnknownCost:true});
  assert.equal(second.action,'bind');
  const result=await sync.apply(v,KEY,{},second,'WRITE');
  assert.equal(result.created,false);
@@ -140,17 +142,75 @@ test('重复同步：第二次绑定同一账户，不重复创建',async()=>{
 });
 test('MANUAL 资产不覆盖报价；报价失败不回滚持仓',async()=>{
  const manual=harness({manual:true});const v=base();
- const p1=await new NativeSync(manual.bridge).preview(v,KEY,{});
+ const p1=await new NativeSync(manual.bridge).preview(v,KEY,{},{allowUnknownCost:true});
  const r1=await new NativeSync(manual.bridge).apply(v,KEY,{},p1,'WRITE');
  assert.equal(r1.quotesPushed,0);
  const failing=harness({quoteFail:true});
- const p2=await new NativeSync(failing.bridge).preview(v,KEY,{});
+ const p2=await new NativeSync(failing.bridge).preview(v,KEY,{},{allowUnknownCost:true});
  const r2=await new NativeSync(failing.bridge).apply(v,KEY,{},p2,'WRITE');
  assert.equal(r2.quotesPushed,0);assert.equal(r2.quoteFailures,2);
- assert.equal(r2.reconcile.ok,true);
+ assert.equal(r2.reconcile?.ok,true);
  assert.ok(r2.warnings.some(w=>w.includes('报价写入失败')));
 });
 test('宿主不可用时预览直接报固定错误，不伪造成功',async()=>{
  const bridge={listAccounts:async()=>{throw new Error('boom');}} as unknown as NativeHostBridge;
  await assert.rejects(new NativeSync(bridge).preview(base(),KEY,{}),(e:any)=>e.code==='HOST_UNAVAILABLE');
+});
+
+test('成本未知默认阻止原生写入；显式允许后才可继续',async()=>{
+ const h=harness();
+ const blocked=await new NativeSync(h.bridge).preview(base(),KEY,{});
+ assert.ok(blocked.blocked.includes('MISSING_COST'));
+ assert.deepEqual(blocked.costUnknownSymbols,['BTC','ETH','NOPAIR']);
+ await assert.rejects(new NativeSync(h.bridge).apply(base(),KEY,{},blocked,'WRITE'),(e:any)=>e.code==='BLOCKED');
+ const allowed=await new NativeSync(h.bridge).preview(base(),KEY,{},{allowUnknownCost:true});
+ assert.equal(allowed.blocked.includes('MISSING_COST'),false);
+ assert.equal(allowed.allowUnknownCost,true);
+});
+test('绑定账户不是 HOLDINGS 加密账户时阻止写入',async()=>{
+ const existing:NativeAccount={id:'acc-t',name:'Binance Spot',accountType:'CRYPTOCURRENCY',currency:'USDT',trackingMode:'TRANSACTIONS',provider:'binance-spot',providerAccountId:KEY};
+ const h=harness({existing:[existing]});
+ const preview=await new NativeSync(h.bridge).preview(base(),KEY,{},{allowUnknownCost:true});
+ assert.ok(preview.blocked.includes('ACCOUNT_MISMATCH'));
+ assert.equal(h.saves.length,0);
+});
+test('读回失败时保留账户与快照，不重试也不重建',async()=>{
+ const h=harness();const sync=new NativeSync(h.bridge),v=base();
+ const preview=await sync.preview(v,KEY,{},{allowUnknownCost:true});
+ h.failNextRead();
+ const result=await sync.apply(v,KEY,{},preview,'WRITE');
+ assert.equal(result.readback,'failed');
+ assert.equal(result.reconcile,null);
+ assert.equal(result.created,true);
+ assert.equal(h.createCalls,1);
+ assert.equal(h.saves.length,1);
+ assert.equal(result.quotesPushed,0);
+ assert.ok(result.warnings.some(w=>w.includes('读回失败')));
+});
+test('用户改名或宿主丢弃 provider 后，仍通过持久绑定找回账户',async()=>{
+ const h=harness();const sync=new NativeSync(h.bridge),v=base();
+ const p1=await sync.preview(v,KEY,{},{allowUnknownCost:true});
+ await sync.apply(v,KEY,{},p1,'WRITE');
+ h.accounts[0].name='我改过的名字';
+ delete h.accounts[0].provider;
+ delete h.accounts[0].providerAccountId;
+ const p2=await sync.preview(v,KEY,{},{allowUnknownCost:true});
+ assert.equal(p2.action,'bind');
+ assert.equal(p2.bound?.id,h.accounts[0].id);
+ assert.equal(h.createCalls,1);
+});
+test('写快照失败后重试：账户保留且不重复创建，同日覆盖',async()=>{
+ const h=harness();const sync=new NativeSync(h.bridge),v=base();
+ const p1=await sync.preview(v,KEY,{},{allowUnknownCost:true});
+ h.failNextSave();
+ await assert.rejects(sync.apply(v,KEY,{},p1,'WRITE'),(e:any)=>e.code==='SNAPSHOT_SAVE_FAILED');
+ assert.equal(h.createCalls,1);
+ assert.equal(h.saves.length,0);
+ const p2=await sync.preview(v,KEY,{},{allowUnknownCost:true});
+ assert.equal(p2.action,'bind');
+ const result=await sync.apply(v,KEY,{},p2,'WRITE');
+ assert.equal(result.created,false);
+ assert.equal(h.createCalls,1);
+ assert.equal(h.saves.length,1);
+ assert.equal(h.saves[0].date,p1.plan.date);
 });

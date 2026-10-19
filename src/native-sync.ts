@@ -44,7 +44,7 @@ export interface NativePlan {
   holdings:NativeHoldingInput[];
   cashBalances:Record<string,string>;
   warnings:NativeWarning[];
-  summary:{positions:number;priced:number;unpriced:number;costKnown:number;costUnknown:number;valued:string|null;cash:string};
+  summary:{positions:number;priced:number;unpriced:number;costKnown:number;costUnknown:number;costUnknownSymbols:string[];valued:string|null;cash:string};
   fingerprint:string;
 }
 export type CostBook=Readonly<Record<string,{unitCost:string}>>;
@@ -108,7 +108,7 @@ export function buildNativePlan(args:{state:PortfolioState;report:ReturnType<typ
   holdings.sort((a,b)=>a.symbol.localeCompare(b.symbol));
   const base:Omit<NativePlan,'fingerprint'>={accountKey,label:nativeAccountLabel(accountKey),currency:NATIVE_CURRENCY,baseCurrency,date,
     account:nativeAccountInput(accountKey),holdings,cashBalances,warnings,
-    summary:{positions:holdings.length,priced,unpriced,costKnown,costUnknown,valued:report.coveredSubtotal,cash:cashBalances[NATIVE_CURRENCY]??'0'}};
+    summary:{positions:holdings.length,priced,unpriced,costKnown,costUnknown,costUnknownSymbols:holdings.filter(h=>!h.averageCost).map(h=>h.symbol),valued:report.coveredSubtotal,cash:cashBalances[NATIVE_CURRENCY]??'0'}};
   return {...base,fingerprint:planFingerprint(base)};
 }
 

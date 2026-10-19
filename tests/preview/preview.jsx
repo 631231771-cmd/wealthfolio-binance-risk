@@ -52,7 +52,8 @@ const mockNativeHost={
  getByDate:async()=>(nativeSaves.at(-1)?.holdings??[]).map(h=>({symbol:h.symbol,quantity:Number(h.quantity),assetId:'asset-'+h.symbol,quoteMode:'MARKET'})),
  updateQuote:async()=>{},
  baseCurrency:async()=>'USD',usdtRate:async()=>0.9998,
- today:()=>new Date().toISOString().slice(0,10)
+ today:()=>new Date().toISOString().slice(0,10),
+ readBinding:async()=>null,writeBinding:async()=>{}
 };
 
 const initial=await scenario('usdc');
@@ -65,8 +66,13 @@ createRoot(document.getElementById('root')).render(<Preview/>);
 if(location.hash.slice(1).startsWith('native')){
  const click=(text,delay)=>setTimeout(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);b?.click();},delay);
  click('原生同步',200);click('检测宿主能力',700);click('生成导入预览',1200);
- if(location.hash.slice(1)==='native-done'){
-  setTimeout(()=>{const c=document.querySelector('.native-confirm input[type=checkbox]');if(c&&!c.checked)c.click();},1700);
-  click('写入原生账户',2100);
+ const flow=location.hash.slice(1);
+ if(flow==='native-allowed'||flow==='native-done'){
+  setTimeout(()=>{const c=document.querySelector('.native-cost-warning input[type=checkbox]');if(c&&!c.checked)c.click();},1600);
+  click('生成导入预览',2000);
+ }
+ if(flow==='native-done'){
+  setTimeout(()=>{const c=document.querySelector('.native-confirm input[type=checkbox]');if(c&&!c.checked)c.click();},2600);
+  click('写入原生账户',3000);
  }
 }

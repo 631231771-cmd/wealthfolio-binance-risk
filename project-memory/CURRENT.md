@@ -1,6 +1,14 @@
 # 当前状态
 
-## v0.3.0 原生账户同步与成本基础（2026-10-19）
+## v0.3.1 原生集成深度验收（2026-10-19）
+
+- 基线 4dc3df1（0.3.0）；工作树 F:\Code\wrisk-ds，分支 review/ds-0.2.1，未推送。
+- 源码结论（Wealthfolio v3.10.0 holdings_valuation_service）：缺报价→市值 0；缺汇率→静默按 1.0；无报价 TTL；未实现盈亏 = 市值 − Position 成本，缺 averageCost 时宿主按 0。
+- 新增门槛：成本缺失默认阻断（可显式允许仅导入数量）、绑定账户类型必须 CRYPTOCURRENCY/HOLDINGS、汇率缺失阻断；账户绑定持久化，改名后仍可找回；读回失败返回"已提交·未读回"；报价失败提示按 0 估值；报价全局影响提示。
+- 验证：249 项测试通过（+5：成本门槛、账户类型、读回失败、改名绑定、保存失败重试），tsc 0 错，verify 全通过；虚构预览三态截图（阻断/允许/写入）。
+- 下一步：本人在独立测试资料库安装 0.3.1，检测→预览→确认→核对原生总额；Astra 审核成本门槛与恢复路径。
+
+## v0.3.0 原生账户同步（历史）
 
 - 基线 81a1781（0.2.2）；工作树 F:\Code\wrisk-ds，分支 review/ds-0.2.1，未推送、未合并 main。
 - 依据 SDK 3.9.0 类型与 Wealthfolio v3.10.0 源码确认：accounts.create 支持 CRYPTOCURRENCY/HOLDINGS；snapshots.save 按 CRYPTO:SYMBOL/QUOTE 去重资产；averageCost 写入成本；USDT 作为现金；USDT→基础货币汇率缺失时阻止写入。
