@@ -27,7 +27,7 @@ async function harness(timeout=100){
   let body:unknown;
   if(u.pathname.endsWith('/time'))body={serverTime:now};
   else if(u.pathname.endsWith('/apiRestrictions'))body=mode==='trade'?{...permissions,enableSpotAndMarginTrading:true}:mode==='no-ip'?{...permissions,ipRestrict:false}:permissions;
-  else if(u.pathname.endsWith('/account'))body={uid:mode==='uid'?2:1,accountType:'SPOT',balances:mode==='zero'?[]:mode==='missing'?null:[{asset:'BTC',free:'0.001',locked:'0'},{asset:'USDT',free:'12',locked:'3'},{asset:'NOPAIR',free:'2',locked:'0'}]};
+  else if(u.pathname.endsWith('/account'))body={uid:mode==='uid'?2:1,accountType:'SPOT',balances:mode==='zero'?[]:mode==='missing'?null:[{asset:'BTC',free:'0.001',locked:'0'},{asset:'USDT',free:'12',locked:'3'},{asset:'NOPAIR',free:'2',locked:'0'}].filter(p=>mode!=='complete'||p.asset!=='NOPAIR')};
   else if(u.pathname.endsWith('/exchangeInfo'))body={symbols:[{symbol:'BTCUSDT',baseAsset:'BTC',quoteAsset:'USDT',status:'TRADING',isSpotTradingAllowed:true}]};
   else body=[{symbol:'BTCUSDT',price:'50000'}];
   return {status:200,headers:{},body:JSON.stringify(body)};
@@ -204,4 +204,14 @@ test('公开行情失败保留历史报价和估值；失败后退避、成功�
  assert.equal(h.reader.getReference()?.report.coveredSubtotal,'65.00000000');
  const count=h.calls.length;h.advance(60_000);await h.reader.tick();assert.equal(h.calls.length,count);
  h.setQuoteFailure(false);h.advance(60_000);await h.reader.tick();assert.equal(h.reader.valued().report.coveredSubtotal,'65.00000000');
+});
+
+test('最新部分估值替代较早完整记录，深拷贝历史且不同余额不复用旧总值',async()=>{
+ const h=await harness();h.setMode('complete');h.reader.authorize('1',ack);await h.reader.sync();await h.reader.refreshQuotes();
+ const first=h.reader.getReference()!;assert.equal(first.report.coverage,'complete');h.setMode('ok');first.state.snapshots[first.state.accounts[0].id].positions[0].quantity='999999';
+ assert.notEqual(h.reader.getReference()!.state.snapshots[first.state.accounts[0].id].positions[0].quantity,'999999');
+ h.advance(130_000);await h.reader.sync();assert.equal(h.reader.getReference()!.at,first.at);await h.reader.refreshQuotes();
+ const latest=h.reader.getReference()!;
+ assert.notEqual(latest.at,first.at);assert.equal(latest.report.coverage,'partial');assert.equal(latest.report.coveredSubtotal,'65.00000000');
+ assert.equal(latest.state.snapshots[latest.state.accounts[0].id].asOf,Object.values(h.reader.getState().snapshots)[0].asOf);
 });

@@ -6,28 +6,44 @@ import {BinanceCredentials} from '../../src/credentials';
 import {SpotQuoteReader} from '../../src/public-market';
 import '../../src/style.css';
 
-const store=new Map(),credentials=new BinanceCredentials({get:async k=>store.get(k)??null,set:async(k,v)=>{store.set(k,v);},delete:async k=>{store.delete(k);}});
-await credentials.save('PREVIEW_FAKE_KEY','PREVIEW_FAKE_SECRET');
-let clock=Date.parse('2026-10-16T08:00:00Z'),mode='complete';
-const holdings=[['USDC','18000'],['BTC','0.075'],['ETH','0.8'],['SOL','12'],['USDT','750'],['DOGE','0.02']];
-const prices={USDC:'0.9993',BTC:'65420',ETH:'2540.18',SOL:'148.32',DOGE:'0.12'};
-const network={request:async request=>{
+// All balances, credentials and prices below are synthetic. No SDK or network.
+const baseTime=Date.parse('2026-10-19T08:00:00Z');
+async function scenario(name){
+ const store=new Map(),credentials=new BinanceCredentials({get:async k=>store.get(k)??null,set:async(k,v)=>{store.set(k,v);},delete:async k=>{store.delete(k);}});
+ await credentials.save('PREVIEW_FAKE_KEY','PREVIEW_FAKE_SECRET');
+ let clock=baseTime,fail=false,balanceFail=false;
+ const holdings=[['USDC',name==='complete'?'2500':'18000'],['BTC','0.075'],['ETH','0.8'],['SOL','12'],['USDT','750'],['DOGE','0.02']];
+ const prices={USDC:'0.9993',BTC:'65420',ETH:'2540.18',SOL:'148.32',DOGE:'0.12'};
+ if(name==='dust')for(let i=0;i<12;i++){holdings.push(['DUST'+i,'0.02']);prices['DUST'+i]='0.15';}
+ if(name==='dust')holdings.push(['UNPRICED','0.000000001']);
+ const network={request:async request=>{
   const url=new URL(request.url);let body;
   if(url.pathname.endsWith('/time'))body={serverTime:clock};
-  else if(url.pathname.endsWith('/apiRestrictions'))body={enableReading:true,ipRestrict:false,enableWithdrawals:false,enableInternalTransfer:false,enableMargin:false,enableFutures:false,permitsUniversalTransfer:false,enableVanillaOptions:false,enableFixApiTrade:false,enableSpotAndMarginTrading:false,enablePortfolioMarginTrading:false};
-  else if(url.pathname.endsWith('/account'))body={uid:1,accountType:'SPOT',balances:(mode==='zero'?[]:holdings).map(([asset,free])=>({asset,free,locked:'0'}))};
+  else if(url.pathname.endsWith('/apiRestrictions')){
+   if(balanceFail)throw new Error('Fictional offline transport');
+   body={enableReading:true,ipRestrict:false,enableWithdrawals:false,enableInternalTransfer:false,enableMargin:false,enableFutures:false,permitsUniversalTransfer:false,enableVanillaOptions:false,enableFixApiTrade:false,enableSpotAndMarginTrading:false,enablePortfolioMarginTrading:false};
+  }else if(url.pathname.endsWith('/account'))body={uid:1,accountType:'SPOT',balances:(name==='zero'?[]:holdings).map(([asset,free])=>({asset,free,locked:'0'}))};
   else if(url.pathname.endsWith('/exchangeInfo'))body={symbols:Object.keys(prices).map(baseAsset=>({baseAsset,quoteAsset:'USDT',symbol:baseAsset+'USDT',status:'TRADING',isSpotTradingAllowed:true}))};
   else if(url.pathname.endsWith('/ticker/price')){
-    if(mode==='failure')return {status:503,headers:{},body:'{}'};
-    body=Object.entries(prices).filter(([code])=>mode!=='partial'||code!=='USDC').map(([code,price])=>({symbol:code+'USDT',price}));
+   if(fail)return {status:503,headers:{},body:'{}'};
+   body=Object.entries(prices).filter(([code])=>name!=='partial'||code!=='USDC').map(([code,price])=>({symbol:code+'USDT',price}));
   }else throw new Error('Preview path not supported');
   return {status:200,headers:{},body:JSON.stringify(body)};
-}};
-const reader=new DirectSpot(credentials,network,new SpotQuoteReader(network,()=>clock),()=>clock);
-reader.setVisible(true);reader.authorize('1',{risk:true,smallAccount:true,readOnlyPage:true,aiIsolated:true});await reader.sync();await reader.refreshQuotes();
+ }};
+ const reader=new DirectSpot(credentials,network,new SpotQuoteReader(network,()=>clock),()=>clock);
+ reader.setVisible(true);reader.authorize('1',{risk:true,smallAccount:true,readOnlyPage:true,aiIsolated:true});await reader.sync();await reader.refreshQuotes();
+ if(name==='stale'||name==='dust')clock+=400_000;
+ if(name==='price-stale')clock+=121_000;
+ if(name==='failure'){clock+=60_000;fail=true;await reader.refreshQuotes();}
+ if(name==='balance-failure'){clock+=60_000;balanceFail=true;await reader.sync();}
+ // Freeze automatic sampling for reproducible visual fixtures. Production tick is tested separately.
+ reader.tick=async()=>{};
+ return {reader,credentials};
+}
+const initial=await scenario('usdc');
 function Preview(){
-  const [,render]=useState(0);
-  const set=async next=>{mode=next;clock=Date.parse('2026-10-16T08:00:00Z');if(next==='stale')clock+=400_000;else {await reader.sync();await reader.refreshQuotes();}render(n=>n+1);};
-  return <><div id="preview-label">仅虚构数据 · 无外部网络、无宿主存储 · 浏览器预览<br/>{[['complete','完整估值'],['partial','USDC缺价'],['failure','报价失败'],['stale','余额过期'],['zero','成功零余额']].map(([key,label])=><button key={key} onClick={()=>void set(key)}>{label}</button>)}</div><main className="wrisk-app"><DirectSpotPanel reader={reader} credentials={credentials}/></main></>;
+ const [active,setActive]=useState('usdc'),[data,setData]=useState(initial),[width,setWidth]=useState('auto');
+ const set=async next=>{data.reader.disconnect();setData(await scenario(next));setActive(next);};
+ return <><div id="preview-label"><span>仅虚构数据 · 内存 transport · 不连接宿主或账户</span><div>{[['complete','完整估值'],['usdc','USDC主仓'],['stale','余额过期'],['price-stale','报价过期'],['partial','部分缺价'],['failure','报价失败'],['balance-failure','余额失败'],['dust','多微额过期'],['zero','成功零余额']].map(([key,label])=><button key={key} aria-pressed={active===key} onClick={()=>void set(key)}>{label}</button>)}<label>窗口宽度 <select value={width} onChange={e=>setWidth(e.target.value)}><option value="auto">自适应</option><option value="920">920px</option><option value="420">420px</option></select></label></div></div><div id="preview-frame" style={{width:width==='auto'?'100%':width+'px',maxWidth:'100%',margin:'auto',containerType:'inline-size'}}><main className="wrisk-app"><DirectSpotPanel key={active} reader={data.reader} credentials={data.credentials}/></main></div></>;
 }
 createRoot(document.getElementById('root')).render(<Preview/>);

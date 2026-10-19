@@ -1,5 +1,11 @@
 # 架构与边界
 
+## v0.2.1 当前展示模型
+
+DirectSpot仅调整会话内历史记录的发布选择与深拷贝；原认证、余额与行情请求/调度不变。portfolioPresentation在原只读portfolioView上选择整份当前/历史记录；数量和采集身份不匹配时禁止历史逐行兜底。PortfolioOverview的总值、排序、微额、配置和详情共享显示记录，风险页仍使用原当前report。
+
+历史快照不持久化，不写账本。部分覆盖的缺价数量保留，稳定币规则/Decimal不变。本人确认自动余额同步的入口移到首页；secrets与setAuto安全条件不变。实现边界见[0.2.1产品说明](PRODUCT-0.2.1.md)。以下旧节作为历史。
+
 ## v0.2.0 当前产品架构
 
 DirectSpot保留已验收的认证路径，只增加公开行情独立调度和会话历史参考。SpotQuoteReader仅接network能力、资产代码与时钟；当前/历史报价分开，市场映射有限缓存，ticker要求TRADING。portfolio-view是只读展示模型；PortfolioOverview负责总值/覆盖、四列持仓、配置及详情，DirectSpotPanel负责连接交互。DeveloperWorkbench仅显式进入时挂载。

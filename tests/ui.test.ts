@@ -91,7 +91,7 @@ test('公开行情失败明确归属行情且不撤销已验证Spot连接和持�
  const q=quoteResult('request-failed',{marketCount:2,pricedCount:0,failedRequestCount:1,unexaminedCount:0,requestCount:3});
  const html=render(sample(),true,true,false,{stage:'quotes',code:'QUOTE_REQUEST_FAILED',quote:q}),main=html.split('class="monitor-toolbar"')[0];
  assert.match(main,/class="status-badge is-good">已连接/);assert.match(main,/公开行情更新失败/);
- assert.ok(main.includes('公开行情请求失败'));assert.ok(html.includes('0.001'));assert.ok(html.includes('65.00'));
+ assert.ok(main.includes('余额数量保留，报价等待重试'));assert.ok(html.includes('公开行情请求失败'));assert.ok(html.includes('0.001'));assert.ok(html.includes('65.00'));
  assert.ok(html.includes('2 / 3 项已估值'));assert.ok(!main.includes('Spot余额读取未完成'));
  assert.ok(html.includes('未检查候选0'));assert.ok(!main.includes('未覆盖0'));
 });
@@ -103,4 +103,13 @@ test('行情超时限流无效响应及生命周期状态不冒充余额认证�
   assert.match(main,new RegExp(`data-quote-state="${severity}"`));assert.ok(main.includes(title));
   assert.match(main,/class="status-badge is-good">已连接/);assert.ok(!main.includes('Spot余额读取未完成'));
  }
+});
+
+test('过期余额仍为已连接会话，不在首页堆叠认证失败提示；自动同步需本人勾选',()=>{
+ const state=sample();state.statuses[state.accounts[0].id].state='failed' as any;
+ const html=render(state,true,true),main=html.split('class="monitor-toolbar"')[0];
+ assert.match(main,/class="status-badge is-good">已连接/);assert.doesNotMatch(main,/数据失效|当前数据不可用|notice-error/);
+ assert.match(html,/我已逐项核对本次持仓，同意自动同步余额/);
+ assert.match(html,/<button disabled="">确认开启 · 每5分钟<\/button>/);
+ assert.match(html,/aria-label="不可用"/);assert.ok(!html.includes('type="password"'));
 });

@@ -88,9 +88,11 @@ export class DirectSpot {
     if(this.auto&&this.retry().canRetry&&this.now()>=this.due){await this.sync();return;}
     if(this.success&&this.retry(true).canRetry&&this.now()>=this.quoteDue)await this.refreshQuotes();
   }
-  private rememberValuation(){
+  private rememberValuation(afterQuotes=false){
     const value=this.valued();
-    if(value.report.coveredSubtotal!==null&&(value.report.coverage==='complete'||this.reference?.report.coverage!=='complete'))this.reference={...value,at:new Date(this.now()).toISOString()};
+    // Keep the latest publishable valuation as one immutable record, including
+    // its coverage and quantities. An older complete record must not mask a newer partial one.
+    if(value.report.coveredSubtotal!==null&&(afterQuotes||value.report.coverage==='complete'||this.reference===null))this.reference=structuredClone({...value,at:new Date(this.now()).toISOString()});
   }
   private async request(req:NetworkRequest,epoch:number,publicOnly=false):Promise<unknown>{
     if(publicOnly&&!(req.method==='GET'&&[PUBLIC_ORIGIN+'/api/v3/time','https://api.binance.com/api/v3/time'].includes(req.url)&&!req.headers&&!req.body))throw new SpotError('invalid');
@@ -235,7 +237,7 @@ export class DirectSpot {
       if(this.connected&&this.visible&&epoch===this.epoch){
         this.diagnostic={stage:'quotes',code:codes[result.status],quote:result};
         this.quoteFailures=result.failedRequestCount?this.quoteFailures+1:0;
-        if(result.pricedCount>0||result.status==='no-candidates')this.rememberValuation();
+        if(result.pricedCount>0||result.status==='no-candidates')this.rememberValuation(true);
       }
     }catch(error){
       const code=error instanceof PublicMarketError?({
