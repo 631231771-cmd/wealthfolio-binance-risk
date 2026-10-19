@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spotSnapshot,spotRisk} from '../src/spot';
-import {buildNativePlan,nativeAccountKey,nativeAccountLabel,reconcilePlan} from '../src/native-sync';
+import {buildNativePlan,nativeAccountKey,nativeAccountLabel,reconcilePlan,resolveUsdtRate} from '../src/native-sync';
 import {NativeSync,findBoundAccount,type NativeHostBridge,type NativeAccount} from '../src/native-host';
 import type {PortfolioState} from '../src/domain';
 
@@ -74,7 +74,7 @@ test('对账：浮点容差、缺失与多余都能区分',()=>{
  assert.deepEqual(extra.extra,['DOGE']);assert.equal(extra.ok,true);
 });
 
-function harness(overrides:{rate?:number|null;base?:string;existing?:NativeAccount[];manual?:boolean;quoteFail?:boolean}={}){
+function harness(overrides:{rate?:number|null;base?:string;existing?:NativeAccount[];manual?:boolean;quoteFail?:boolean;dated?:{rate:number|null;error?:string|null};records?:{fromCurrency:string;toCurrency:string;rate:number|string;source?:string;timestamp?:string}[]}={}){
  const accounts:NativeAccount[]=[...(overrides.existing??[])];
  const saves:{accountId:string;holdings:any[];cash:Record<string,string>;date:string}[]=[];
  const quotes:string[]=[];
@@ -88,7 +88,8 @@ function harness(overrides:{rate?:number|null;base?:string;existing?:NativeAccou
   getByDate:async()=>{if(readFail){readFail=false;throw new Error('read');}return (saves.at(-1)?.holdings??[]).map(h=>({symbol:h.symbol,quantity:Number(h.quantity),assetId:'asset-'+h.symbol,quoteMode:overrides.manual?'MANUAL':'MARKET'}));},
   updateQuote:async(assetId)=>{if(overrides.quoteFail)throw new Error('x');quotes.push(assetId);},
   baseCurrency:async()=>overrides.base??'USD',
-  usdtRate:async()=>overrides.rate===undefined?0.9998:overrides.rate,
+  rateForDate:async()=>overrides.dated??{rate:null,error:'Invalid currency code: USDT'},
+  listRates:async()=>overrides.records??(overrides.rate===null?[]:[{fromCurrency:'USDT',toCurrency:'USD',rate:overrides.rate===undefined?0.9998:overrides.rate,source:'MANUAL',timestamp:'2026-10-19T00:00:00Z'}]),
   today:()=>DATE,
   readBinding:async()=>boundId,
   writeBinding:async(_key,id)=>{boundId=id;}
@@ -213,4 +214,43 @@ test('写快照失败后重试：账户保留且不重复创建，同日覆盖',
  assert.equal(h.createCalls,1);
  assert.equal(h.saves.length,1);
  assert.equal(h.saves[0].date,p1.plan.date);
+});
+
+// 真实宿主 3.10.0：日期汇率接口只接受 3 位代码，USDT 返回 InvalidCurrencyCode；
+// 手动汇率本身有效，必须回退到 exchangeRates.getAll() 的最新记录。
+test('日期接口拒绝USDT时回退到最新手动汇率，不再误报不可用',async()=>{
+ const h=harness({rate:1,dated:{rate:null,error:'Invalid currency code: USDT'}});
+ const probe=await new NativeSync(h.bridge).probe(KEY);
+ assert.equal(probe.usdtRate,1);
+ assert.equal(probe.rateDiagnostic.status,'valid');
+ assert.equal(probe.rateDiagnostic.source,'latest');
+ assert.deepEqual(probe.reasons,[]);
+ const preview=await new NativeSync(h.bridge).preview(base(),KEY,{},{allowUnknownCost:true});
+ assert.equal(preview.blocked.includes('NO_USDT_RATE'),false);
+ assert.equal(preview.rate,1);
+});
+test('汇率解析矩阵：日期优先、最新回退、反向、无记录、不可解析、权限、过期',()=>{
+ assert.deepEqual(resolveUsdtRate({base:'USDT',date:DATE}),{rate:1,status:'valid',source:'same'});
+ assert.equal(resolveUsdtRate({base:'USD',date:DATE,dated:{rate:1}}).source,'dated');
+ const latest=resolveUsdtRate({base:'USD',date:DATE,dated:{rate:null,error:'Invalid currency code: USDT'},records:[{fromCurrency:'USDT',toCurrency:'USD',rate:'1.0',source:'MANUAL',timestamp:'2026-10-19T00:00:00Z'}],now:'2026-10-19T12:00:00Z'});
+ assert.equal(latest.rate,1);assert.equal(latest.source,'latest');assert.equal(latest.status,'valid');
+ const inverse=resolveUsdtRate({base:'USD',date:DATE,dated:{rate:null},records:[{fromCurrency:'USD',toCurrency:'USDT',rate:1.25}],now:'2026-10-19T00:00:00Z'});
+ assert.equal(inverse.rate,0.8);assert.equal(inverse.source,'inverse');
+ assert.equal(resolveUsdtRate({base:'USD',date:DATE,dated:{rate:null},records:[]}).status,'no-record');
+ assert.equal(resolveUsdtRate({base:'USD',date:DATE,dated:{rate:null},records:[{fromCurrency:'USDT',toCurrency:'USD',rate:'abc'}]}).status,'unparseable');
+ assert.equal(resolveUsdtRate({base:'USD',date:DATE,listError:new Error('permission denied')}).status,'permission-denied');
+ assert.equal(resolveUsdtRate({base:'USD',date:DATE,listError:new Error('boom')}).status,'api-unavailable');
+ const stale=resolveUsdtRate({base:'USD',date:DATE,dated:{rate:null},records:[{fromCurrency:'USDT',toCurrency:'USD',rate:1,timestamp:'2026-10-01T00:00:00Z'}],now:'2026-10-19T00:00:00Z'});
+ assert.equal(stale.rate,1);assert.equal(stale.status,'stale');
+});
+test('汇率接口权限被拒绝时区分于缺少汇率，并保持写入阻断',async()=>{
+ const h=harness({});
+ h.bridge.rateForDate=async()=>{throw new Error('permission denied');};
+ h.bridge.listRates=async()=>{throw new Error('permission denied');};
+ const probe=await new NativeSync(h.bridge).probe(KEY);
+ assert.equal(probe.available,true);
+ assert.equal(probe.usdtRate,null);
+ assert.equal(probe.rateDiagnostic.status,'permission-denied');
+ const preview=await new NativeSync(h.bridge).preview(base(),KEY,{},{allowUnknownCost:true});
+ assert.ok(preview.blocked.includes('NO_USDT_RATE'));
 });

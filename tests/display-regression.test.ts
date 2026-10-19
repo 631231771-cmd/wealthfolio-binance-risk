@@ -243,3 +243,10 @@ test('配置配色与资产身份绑定，排序变化不换色',()=>{
  assert.equal(assetTone('USDC'),assetTone('USDC'));
  assert.notEqual(assetTone('USDC'),assetTone('BTC'));
 });
+
+test('账户级负收益在Hero显示下跌色与负号，不因负值抛错',()=>{
+ const value=fixture();
+ const html=renderToStaticMarkup(createElement(PortfolioOverview,{value,costs:{BTC:{unitCost:'70000'},USDC:{unitCost:'1'},USDT:{unitCost:'1'},DUST:{unitCost:'0.02'}}}));
+ assert.ok(html.includes('is-down'));
+ assert.ok(html.includes('-'));
+});

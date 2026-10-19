@@ -51,7 +51,10 @@ const mockNativeHost={
  listSnapshots:async()=>[{snapshotDate:nativeSaves.at(-1)?.date??'',positionCount:nativeSaves.at(-1)?.holdings.length??0,cashCurrencyCount:1}],
  getByDate:async()=>(nativeSaves.at(-1)?.holdings??[]).map(h=>({symbol:h.symbol,quantity:Number(h.quantity),assetId:'asset-'+h.symbol,quoteMode:'MARKET'})),
  updateQuote:async()=>{},
- baseCurrency:async()=>'USD',usdtRate:async()=>0.9998,
+ baseCurrency:async()=>'USD',
+ // 复现真实宿主 3.10.0：日期汇率接口拒绝 4 位 USDT，但手动最新汇率存在。
+ rateForDate:async()=>({rate:null,error:'Invalid currency code: USDT'}),
+ listRates:async()=>[{fromCurrency:'USDT',toCurrency:'USD',rate:1,source:'MANUAL',timestamp:'2026-10-19T00:00:00Z'}],
  today:()=>new Date().toISOString().slice(0,10),
  readBinding:async()=>null,writeBinding:async()=>{}
 };
@@ -60,19 +63,15 @@ const initial=await scenario('usdc');
 function Preview(){
  const [active,setActive]=useState('usdc'),[data,setData]=useState(initial),[width,setWidth]=useState('auto');
  const set=async next=>{data.reader.disconnect();setData(await scenario(next));setActive(next);};
- return <><div id="preview-label"><span>仅虚构数据 · 内存 transport · 不连接宿主或账户</span><div>{[['complete','完整估值'],['usdc','USDC主仓'],['stale','余额过期'],['price-stale','报价过期'],['partial','部分缺价'],['failure','报价失败'],['balance-failure','余额失败'],['dust','多微额过期'],['zero','成功零余额']].map(([key,label])=><button key={key} aria-pressed={active===key} onClick={()=>void set(key)}>{label}</button>)}<label>窗口宽度 <select value={width} onChange={e=>setWidth(e.target.value)}><option value="auto">自适应</option><option value="920">920px</option><option value="420">420px</option></select></label></div></div><div id="preview-frame" style={{width:width==='auto'?'100%':width+'px',maxWidth:'100%',margin:'auto',containerType:'inline-size'}}><main className="wrisk-app"><DirectSpotPanel key={active} reader={data.reader} credentials={data.credentials} host={mockNativeHost}/></main></div></>;
+ return <><div id="preview-label"><span>仅虚构数据 · 内存 transport · 不连接宿主或账户</span><div>{[['complete','完整估值'],['usdc','USDC主仓'],['stale','余额过期'],['price-stale','报价过期'],['partial','部分缺价'],['failure','报价失败'],['balance-failure','余额失败'],['dust','多微额过期'],['zero','成功零余额']].map(([key,label])=><button key={key} aria-pressed={active===key} onClick={()=>void set(key)}>{label}</button>)}<label>窗口宽度 <select value={width} onChange={e=>setWidth(e.target.value)}><option value="auto">自适应</option><option value="920">920px</option><option value="420">420px</option></select></label></div></div><div id="preview-frame" style={{width:width==='auto'?'100%':width+'px',maxWidth:'100%',margin:'auto',containerType:'inline-size'}}><main className="wrisk-app"><DirectSpotPanel key={active} reader={data.reader} credentials={data.credentials} host={mockNativeHost} nativeInitialCosts={location.hash.slice(1).startsWith('native-costs')||location.hash.slice(1)==='native-done'?{BTC:{unitCost:'60000'},ETH:{unitCost:'2500'},SOL:{unitCost:'140'},USDC:{unitCost:'1'},DOGE:{unitCost:'0.11'}}:undefined}/></main></div></>;
 }
 createRoot(document.getElementById('root')).render(<Preview/>);
 if(location.hash.slice(1).startsWith('native')){
  const click=(text,delay)=>setTimeout(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===text);b?.click();},delay);
  click('原生同步',200);click('检测宿主能力',700);click('生成导入预览',1200);
  const flow=location.hash.slice(1);
- if(flow==='native-allowed'||flow==='native-done'){
-  setTimeout(()=>{const c=document.querySelector('.native-cost-warning input[type=checkbox]');if(c&&!c.checked)c.click();},1600);
-  click('生成导入预览',2000);
- }
  if(flow==='native-done'){
-  setTimeout(()=>{const c=document.querySelector('.native-confirm input[type=checkbox]');if(c&&!c.checked)c.click();},2600);
-  click('写入原生账户',3000);
+  setTimeout(()=>{const c=document.querySelector('.native-confirm input[type=checkbox]');if(c&&!c.checked)c.click();},1700);
+  click('写入原生账户',2100);
  }
 }

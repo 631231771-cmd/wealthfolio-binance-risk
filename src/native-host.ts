@@ -1,7 +1,7 @@
 import type {AddonContext} from '@wealthfolio/addon-sdk';
 import {nonnegative, type PortfolioState} from './domain';
 import type {calculateRisk} from './domain';
-import {buildNativePlan, type CostBook, type NativeAccountInput, type NativeHoldingInput, type NativePlan, type NativeWarning, reconcilePlan, NATIVE_PROVIDER, NATIVE_CURRENCY, nativeAccountLabel} from './native-sync';
+import {buildNativePlan, resolveUsdtRate, type CostBook, type NativeAccountInput, type NativeHoldingInput, type NativePlan, type NativeWarning, type RateRecord, type RateResolution, reconcilePlan, NATIVE_PROVIDER, NATIVE_CURRENCY, nativeAccountLabel} from './native-sync';
 import type {Valuation} from './portfolio-view';
 
 export interface NativeAccount {
@@ -27,7 +27,8 @@ export interface NativeHostBridge {
   getByDate(accountId:string,date:string):Promise<NativeActualRow[]>;
   updateQuote(assetId:string,quote:NativeQuote):Promise<void>;
   baseCurrency():Promise<string>;
-  usdtRate(to:string,date:string):Promise<number|null>;
+  rateForDate(from:string,to:string,date:string):Promise<{rate:number|null;error?:string|null}>;
+  listRates():Promise<RateRecord[]>;
   today():string;
   readBinding(key:string):Promise<string|null>;
   writeBinding(key:string,accountId:string):Promise<void>;
@@ -38,13 +39,14 @@ export class NativeSyncError extends Error {
 }
 export interface NativeOptions {allowUnknownCost?:boolean}
 export interface NativeProbe {
-  available:boolean; baseCurrency:string; usdtRate:number|null; accountCount:number;
+  available:boolean; baseCurrency:string; usdtRate:number|null; rateDiagnostic:RateResolution; accountCount:number;
   bound:NativeAccount|null; reasons:string[];
 }
 export interface NativePreview {
   plan:NativePlan; bound:NativeAccount|null; action:'create'|'bind'; rate:number|null;
   existingDates:string[]; symbols:NativeCheck['symbols']; validationErrors:string[];
   blocked:string[]; warnings:NativeWarning[];
+  rateDiagnostic:RateResolution;
   allowUnknownCost:boolean; costUnknownSymbols:string[];
 }
 export interface NativeResult {
@@ -69,16 +71,26 @@ export class NativeSync {
   private async boundId(accountKey:string){
     try{return await this.host.readBinding(accountKey);}catch{return null;}
   }
+  // 宿主按日期查询只接受 3 位代码，USDT 会被拒绝；失败时回退到最新汇率列表。
+  private async resolveRate(baseCurrency:string,date:string):Promise<RateResolution>{
+    if(baseCurrency.trim().toUpperCase()===NATIVE_CURRENCY)return resolveUsdtRate({base:baseCurrency,date});
+    let dated:{rate:number|null;error?:string|null}|null=null,datedError:unknown,records:RateRecord[]|null=null,listError:unknown;
+    try{dated=await call(()=>this.host.rateForDate(NATIVE_CURRENCY,baseCurrency,date));}catch(error){datedError=error;}
+    const quick=resolveUsdtRate({base:baseCurrency,date,dated,datedError});
+    if(quick.rate!==null)return quick;
+    try{records=await call(()=>this.host.listRates());}catch(error){listError=error;}
+    return resolveUsdtRate({base:baseCurrency,date,dated,datedError,records,listError,now:new Date().toISOString()});
+  }
   async probe(accountKey:string):Promise<NativeProbe>{
     try{
       const [accounts,baseCurrency]=await Promise.all([call(()=>this.host.listAccounts()),call(()=>this.host.baseCurrency())]);
       const date=this.host.today();
-      const usdtRate=baseCurrency===NATIVE_CURRENCY?1:await this.host.usdtRate(baseCurrency,date);
+      const rateDiagnostic=await this.resolveRate(baseCurrency,date);
       const bound=findBoundAccount(accounts,accountKey,await this.boundId(accountKey));
-      return {available:true,baseCurrency,usdtRate,accountCount:accounts.length,bound,
-        reasons:baseCurrency!==NATIVE_CURRENCY&&usdtRate===null?['NO_USDT_RATE']:[]};
+      return {available:true,baseCurrency,usdtRate:rateDiagnostic.rate,rateDiagnostic,accountCount:accounts.length,bound,
+        reasons:rateDiagnostic.rate===null?['NO_USDT_RATE']:[]};
     }catch{
-      return {available:false,baseCurrency:'',usdtRate:null,accountCount:0,bound:null,reasons:['HOST_UNAVAILABLE']};
+      return {available:false,baseCurrency:'',usdtRate:null,rateDiagnostic:{rate:null,status:'api-unavailable',source:null},accountCount:0,bound:null,reasons:['HOST_UNAVAILABLE']};
     }
   }
   async preview(value:Valuation,accountKey:string,costs:CostBook,options:NativeOptions={}):Promise<NativePreview>{
@@ -86,7 +98,8 @@ export class NativeSync {
     try{[accounts,baseCurrency]=await Promise.all([call(()=>this.host.listAccounts()),call(()=>this.host.baseCurrency())]);}
     catch{throw new NativeSyncError('HOST_UNAVAILABLE');}
     const date=this.host.today();
-    const rate=baseCurrency===NATIVE_CURRENCY?1:await this.host.usdtRate(baseCurrency,date);
+    const rateDiagnostic=await this.resolveRate(baseCurrency,date);
+    const rate=rateDiagnostic.rate;
     const plan=buildNativePlan({state:value.state,report:value.report,accountKey,baseCurrency,date,costs});
     const bound=findBoundAccount(accounts,accountKey,await this.boundId(accountKey));
     let existingDates:string[]=[],symbols:NativeCheck['symbols']=[],validationErrors:string[]=[];
@@ -97,11 +110,11 @@ export class NativeSync {
       }catch{validationErrors.push('SYMBOL_PREFLIGHT_FAILED');}
     }
     const blocked:string[]=[];
-    if(baseCurrency!==NATIVE_CURRENCY&&rate===null)blocked.push('NO_USDT_RATE');
+    if(rate===null)blocked.push('NO_USDT_RATE');
     if(bound&&accountMismatch(bound))blocked.push('ACCOUNT_MISMATCH');
     if(plan.summary.costUnknownSymbols.length&&!options.allowUnknownCost)blocked.push('MISSING_COST');
     if(!plan.holdings.length&&!Object.keys(plan.cashBalances).length)blocked.push('EMPTY_PORTFOLIO');
-    return {plan,bound,action:bound?'bind':'create',rate,existingDates,symbols,validationErrors,blocked,warnings:plan.warnings,
+    return {plan,bound,action:bound?'bind':'create',rate,rateDiagnostic,existingDates,symbols,validationErrors,blocked,warnings:plan.warnings,
       allowUnknownCost:!!options.allowUnknownCost,costUnknownSymbols:plan.summary.costUnknownSymbols};
   }
   // 写入必须显式确认，且预览指纹必须与当前持仓一致，避免用过期预览写账本。
@@ -169,7 +182,8 @@ export function createHostBridge(api:AddonContext['api']):NativeHostBridge{
     getByDate:async(accountId,date)=>(await api.snapshots.getByDate(accountId,date)).map(h=>({symbol:h.instrument?.symbol??'',quantity:h.quantity,assetId:h.instrument?.id,quoteMode:h.instrument?.quoteMode})),
     updateQuote:(assetId,quote)=>api.quotes.update(assetId,quote),
     baseCurrency:async()=>(await api.settings.get()).baseCurrency,
-    usdtRate:async(to,date)=>{const [row]=await api.exchangeRates.getRatesForDates([{fromCurrency:NATIVE_CURRENCY,toCurrency:to,date}]);return row?.rate??null;},
+    rateForDate:async(from,to,date)=>{const [row]=await api.exchangeRates.getRatesForDates([{fromCurrency:from,toCurrency:to,date}]);return {rate:row?.rate??null,error:row?.error??null};},
+    listRates:async()=>(await api.exchangeRates.getAll()).map(r=>({fromCurrency:r.fromCurrency,toCurrency:r.toCurrency,rate:r.rate,source:r.source,timestamp:r.timestamp})),
     today,
     readBinding:async key=>{try{return await api.storage.get(bindingKey(key));}catch{return null;}},
     writeBinding:async(key,accountId)=>{await api.storage.set(bindingKey(key),accountId);}

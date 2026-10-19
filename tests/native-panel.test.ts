@@ -23,7 +23,7 @@ const reader=(v:ReturnType<typeof value>)=>({valued:()=>v,getAccountKey:()=>KEY}
 const host=()=>({
  listAccounts:async()=>[],createAccount:async()=>{throw new Error('no');},checkImport:async()=>({existingDates:[],symbols:[],validationErrors:[]}),
  saveSnapshot:async()=>{},listSnapshots:async()=>[],getByDate:async()=>[],updateQuote:async()=>{},
- baseCurrency:async()=>'USD',usdtRate:async()=>0.9998,today:()=>'2026-10-19',readBinding:async()=>null,writeBinding:async()=>{}
+ baseCurrency:async()=>'USD',rateForDate:async()=>({rate:null,error:'Invalid currency code: USDT'}),listRates:async()=>[{fromCurrency:'USDT',toCurrency:'USD',rate:0.9998,source:'MANUAL',timestamp:'2026-10-19T00:00:00Z'}],today:()=>'2026-10-19',readBinding:async()=>null,writeBinding:async()=>{}
 } as NativeHostBridge);
 
 test('无宿主时明确说明原生写入不可用，不展示可点击的写入按钮',()=>{
@@ -46,4 +46,10 @@ test('面板展示成本覆盖口径，未知成本保留为未知',()=>{
  const html=renderToStaticMarkup(createElement(NativePanel,{reader:reader(v),host:host(),onCosts:()=>{}}));
  assert.match(html,/尚未录入任何成本/);
  assert.match(html,/未知/);
+});
+
+test('负的未实现盈亏不会崩溃，显示负号与下跌色',()=>{
+ const html=renderToStaticMarkup(createElement(NativePanel,{reader:reader(value()),host:host(),initialCosts:{BTC:{unitCost:'70000'},USDT:{unitCost:'1'}}}));
+ assert.ok(html.includes('-50.00'));
+ assert.ok(html.includes('is-down'));
 });

@@ -1,9 +1,21 @@
-import {useMemo,useState} from 'react';
+import {useEffect,useMemo,useState} from 'react';
 import {nonnegative} from './domain';
 import {costSummary,costHeadline,type CostBook} from './cost-basis';
 import {displayAmount as money,displayPercent as percent,displayQuantity} from './portfolio-view';
 import {NativeSync,NativeSyncError,type NativeHostBridge,type NativePreview,type NativeProbe,type NativeResult} from './native-host';
+import type {RateResolution} from './native-sync';
 import type {DirectSpot} from './direct-spot';
+
+const sourceText:Record<string,string>={same:'同币种',dated:'按日期',latest:'最新记录',inverse:'反向汇率'};
+const rateStatusText:Record<string,string>={valid:'有效',stale:'有效（记录较旧）','no-record':'未找到记录',unparseable:'记录无法解析','api-unavailable':'接口不可用','permission-denied':'权限不足'};
+export function rateLabel(r:RateResolution):string{
+  if(r.rate===null)return rateStatusText[r.status]??r.status;
+  const parts=[r.rate.toFixed(6)];
+  if(r.source)parts.push(sourceText[r.source]??r.source);
+  if(r.status==='stale')parts.push('记录较旧');
+  if(r.asOf)parts.push(r.asOf.slice(0,10));
+  return parts.join(' · ');
+}
 
 const errorText:Record<string,string>={
   NOT_CONFIRMED:'需要本人勾选确认后才能写入。',
@@ -22,15 +34,15 @@ const blockedText:Record<string,string>={
   ACCOUNT_MISMATCH:'绑定账户不是 CRYPTOCURRENCY · HOLDINGS，已停止写入。'
 };
 
-export function NativePanel({reader,host,onCosts}:{reader:DirectSpot;host?:NativeHostBridge;onCosts?:(book:CostBook)=>void}){
+export function NativePanel({reader,host,onCosts,initialCosts}:{reader:DirectSpot;host?:NativeHostBridge;onCosts?:(book:CostBook)=>void;initialCosts?:CostBook}){
   const [probe,setProbe]=useState<NativeProbe|null>(null);
   const [preview,setPreview]=useState<NativePreview|null>(null);
   const [result,setResult]=useState<NativeResult|null>(null);
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
   const [confirmed,setConfirmed]=useState(false);
-  const [allowUnknownCost,setAllowUnknownCost]=useState(false);
-  const [draft,setDraft]=useState<Record<string,string>>({});
+  const [draft,setDraft]=useState<Record<string,string>>(()=>Object.fromEntries(Object.entries(initialCosts??{}).map(([code,v])=>[code,v.unitCost])));
+  useEffect(()=>{if(initialCosts)onCosts?.(initialCosts);},[]);
   const sync=useMemo(()=>host?new NativeSync(host):null,[host]);
   const {state,report}=reader.valued();
   const book:CostBook=Object.fromEntries(Object.entries(draft).filter(([,v])=>v.trim()).map(([code,unitCost])=>[code,{unitCost:unitCost.trim()}]));
@@ -51,12 +63,12 @@ export function NativePanel({reader,host,onCosts}:{reader:DirectSpot;host?:Nativ
       <p className="native-lead">把当前 Binance Spot 持仓写入一个独立的 <strong>CRYPTOCURRENCY · HOLDINGS</strong> 原生账户。不会修改其他账户、历史模拟账户或已有资产的成本。</p>
       <div className="native-actions">
         <button disabled={busy||!accountKey} onClick={()=>void run(async()=>{const next=await sync.probe(accountKey!);setProbe(next);setMessage(next.available?'':'宿主不可用，未做任何写入。');})}>检测宿主能力</button>
-        <button className="button-primary" disabled={busy||!accountKey} onClick={()=>void run(async()=>{const next=await sync.preview(reader.valued(),accountKey!,book,{allowUnknownCost});setPreview(next);setResult(null);setConfirmed(false);setProbe({available:true,baseCurrency:next.plan.baseCurrency,usdtRate:next.rate,accountCount:0,bound:next.bound,reasons:next.blocked});})}>生成导入预览</button>
+        <button className="button-primary" disabled={busy||!accountKey} onClick={()=>void run(async()=>{const next=await sync.preview(reader.valued(),accountKey!,book);setPreview(next);setResult(null);setConfirmed(false);setProbe({available:true,baseCurrency:next.plan.baseCurrency,usdtRate:next.rate,rateDiagnostic:next.rateDiagnostic,accountCount:0,bound:next.bound,reasons:next.blocked});})}>生成导入预览</button>
       </div>
       {!accountKey&&<p className="native-warn">请先完成本人确认的余额查询；账户绑定使用不可逆短哈希，不保存原始 UID。</p>}
       {probe&&<dl className="native-meta">
         <div><dt>基础货币</dt><dd>{probe.baseCurrency||'—'}</dd></div>
-        <div><dt>USDT → 基础货币</dt><dd>{probe.usdtRate===null?'不可用':probe.usdtRate===1?'同币种':probe.usdtRate.toFixed(6)}</dd></div>
+        <div><dt>USDT → 基础货币</dt><dd>{probe.rateDiagnostic?rateLabel(probe.rateDiagnostic):(probe.usdtRate===null?'不可用':probe.usdtRate.toFixed(6))}</dd></div>
         <div><dt>绑定账户</dt><dd>{probe.bound?`${probe.bound.name}（${probe.bound.id.slice(0,8)}）`:'将新建'}</dd></div>
       </dl>}
       {probe&&!probe.available&&<p className="native-warn">无法读取原生账户：未写入任何内容。</p>}
@@ -69,13 +81,14 @@ export function NativePanel({reader,host,onCosts}:{reader:DirectSpot;host?:Nativ
       <div className="table-scroll"><table className="portfolio-table native-cost-table"><thead><tr><th>资产</th><th>数量</th><th>单位成本</th><th>市值</th><th>未实现盈亏</th></tr></thead><tbody>
         {rows.map(position=>{
           const row=costs.rows.find(r=>r.code===position.asset.code);
-          const gain=row?.gain?nonnegative(row.gain):null;
+          const gainValue=row?.gain?Number(row.gain):null;
+          const pctValue=row?.gainPct?Number(row.gainPct):null;
           return <tr key={position.asset.code}>
             <td><strong>{position.asset.code}</strong></td>
             <td className="number quantity">{displayQuantity(position.quantity)}</td>
             <td className="number"><input className="cost-input" inputMode="decimal" aria-label={`${position.asset.code} 单位成本`} placeholder="未知" value={draft[position.asset.code]??''} onChange={e=>setCost(position.asset.code,e.target.value)}/></td>
             <td className="number value">{money(row?.value)}</td>
-            <td className={'number value'+(gain?(gain.isNegative()?' is-down':' is-up'):'')}>{row?.gain?`${gain!.isNegative()?'':'+'}${money(row.gain)}${row.gainPct?` · ${percent(row.gainPct)}`:''}`:'—'}</td>
+            <td className={'number value'+(gainValue===null||!Number.isFinite(gainValue)?'':gainValue<0?' is-down':' is-up')}>{gainValue===null||!Number.isFinite(gainValue)?'—':`${gainValue<0?'-':'+'}${money(Math.abs(gainValue).toFixed(2))}${pctValue!==null?` · ${(pctValue*100).toFixed(2)}%`:''}`}</td>
           </tr>;
         })}
       </tbody></table></div>
@@ -92,10 +105,7 @@ export function NativePanel({reader,host,onCosts}:{reader:DirectSpot;host?:Nativ
         {preview.rate!==null&&preview.plan.baseCurrency!=='USDT'&&preview.plan.summary.valued&&<div><dt>预计基础货币</dt><dd>≈ {money((Number(preview.plan.summary.valued)*preview.rate).toFixed(2))} {preview.plan.baseCurrency}</dd></div>}
       </dl>
       {preview.blocked.length>0&&<div className="native-blocked" role="alert">{preview.blocked.map(code=><p key={code}>{blockedText[code]??code}</p>)}</div>}
-      {preview.costUnknownSymbols.length>0&&<div className="native-cost-warning">
-        <p>成本未知：{preview.costUnknownSymbols.join('、')}。宿主会把缺失成本当作 0，这些资产的未实现盈亏将等于全部市值。</p>
-        <label className="check-label"><input type="checkbox" checked={allowUnknownCost} onChange={e=>{setAllowUnknownCost(e.target.checked);setPreview(null);setConfirmed(false);}}/>允许这些资产仅导入数量；原生盈亏对它们不可用。</label>
-      </div>}
+      {preview.costUnknownSymbols.length>0&&<div className="native-cost-warning"><p>成本未知：{preview.costUnknownSymbols.join('、')}。宿主没有“成本未知”的表示，缺失 averageCost 会被当作 0，未实现盈亏等于全部市值。请先录入成本；本插件不会用说明性提示代替真实数据隔离。</p></div>}
       {preview.warnings.length>0&&<ul className="native-warnings">{preview.warnings.map((w,i)=><li key={i}>{w.symbol?`${w.symbol} · `:''}{w.detail}</li>)}</ul>}
       {preview.symbols.length>0&&<p className="native-summary">宿主预检：{preview.symbols.filter(s=>s.found).length} / {preview.symbols.length} 个符号已识别。</p>}
       <p className="native-summary">原生估值依赖报价与汇率：未写入报价的资产在原生页面按 0 计；报价按资产全局写入，可能影响其他账户中同一资产的估值；MANUAL 资产会跳过。USDT→基础货币由宿主换算，可能与插件显示不同。</p>

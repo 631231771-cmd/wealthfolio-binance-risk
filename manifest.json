@@ -1,7 +1,7 @@
 {
   "id": "wealthfolio-binance-risk",
   "name": "币安资产总览",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Binance Spot 只读连接、原生账户同步与成本基础；历史估值与公开行情独立，未核实成本不计算盈亏。",
   "author": "个人项目",
   "main": "dist/addon.js",
@@ -82,6 +82,7 @@
     {
       "category": "currency",
       "functions": [
+        "getAll",
         "getRatesForDates"
       ],
       "purpose": "只读检查 USDT 到基础货币的汇率是否存在，缺失时阻止写入"

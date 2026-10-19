@@ -24,22 +24,29 @@ test('全部成本已知：盈亏分母是成本，不是市值',()=>{
  assert.equal(s.coverage,'1.000000');
  assert.deepEqual(costHeadline(s),{label:'持仓累计盈亏',value:'50.00000000',pct:'0.071429',scope:'complete'});
 });
-test('部分成本已知：只汇总已核实部分并明确标注',()=>{
- const s=costSummary(v().state,v().report,{BTC:{unitCost:'60000'}});
+test('部分成本已知：只汇总已核实部分并明确标注，USDT现金按面值',()=>{
+ const v3=valuation([{asset:'USDT',free:'100'},{asset:'BTC',free:'0.01'},{asset:'ETH',free:'1'}],{USDT:'1',BTC:'65000',ETH:'2500'});
+ const s=costSummary(v3.state,v3.report,{BTC:{unitCost:'60000'}});
  assert.equal(s.state,'partial');
- assert.equal(s.knownValue,'650.00000000');
- assert.equal(s.cost,'600.00000000');
+ assert.equal(s.knownValue,'750.00000000');   // USDT 100 + BTC 650
+ assert.equal(s.cost,'700.00000000');         // USDT 100 + BTC 600
  assert.equal(s.gain,'50.00000000');
- assert.equal(s.coverage,'0.866667');
+ assert.equal(s.coverage,'0.230769');         // 750 / 3250
+ assert.equal(s.rows.find(r=>r.code==='USDT')?.costKnown,true);
+ assert.equal(s.rows.find(r=>r.code==='ETH')?.costKnown,false);
  assert.equal(costHeadline(s).scope,'partial');
  assert.equal(costHeadline(s).label,'仅已核实成本部分');
 });
-test('没有成本：不产生任何收益率，也不把未知当零',()=>{
- const s=costSummary(v().state,v().report,{});
- assert.equal(s.state,'none');
- assert.equal(s.gain,null);assert.equal(s.gainPct,null);assert.equal(s.cost,null);
- assert.equal(costHeadline(s).value,null);
- assert.ok(s.issues.includes('MISSING_COST'));
+test('只有现金时成本完整且盈亏为零；证券缺成本时为部分覆盖',()=>{
+ const cash=valuation([{asset:'USDT',free:'100'}],{USDT:'1'});
+ const onlyCash=costSummary(cash.state,cash.report,{});
+ assert.equal(onlyCash.state,'complete');
+ assert.equal(onlyCash.gain,'0.00000000');
+ const mixed=costSummary(v().state,v().report,{});
+ assert.equal(mixed.state,'none');            // 没有任何证券成本，不宣称部分已核实
+ assert.equal(mixed.gain,null);
+ assert.equal(costHeadline(mixed).value,null);
+ assert.ok(mixed.issues.includes('MISSING_COST'));
 });
 test('缺价资产让覆盖不完整，成本为零或非法不进入账本',()=>{
  const missing=valuation([{asset:'USDT',free:'100'},{asset:'NOPAIR',free:'3'}],{USDT:'1'});

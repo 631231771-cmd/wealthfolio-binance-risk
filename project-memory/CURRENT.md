@@ -1,6 +1,16 @@
 # 当前状态
 
-## v0.3.1 原生集成深度验收（2026-10-19）
+## v0.3.2 汇率读取修复（2026-10-19）
+
+- 基线 72fc6d0（0.3.1）；工作树 F:\Code\wrisk-ds，分支 review/ds-0.2.1，未推送。
+- 根因：Wealthfolio 3.10.0 `get_exchange_rate_for_date` 强制货币代码 3 位字母，USDT 被 InvalidCurrencyCode 拒绝；批量接口返回 rate=null。手动汇率在 `exchangeRates.getAll()` 中有效。
+- 修复：日期接口优先，失败回退 getAll（直向/反向），新增只读诊断（有效/较旧/无记录/无法解析/权限/接口不可用）；`currency` 增加 getAll 权限。不默认 1。
+- 同时修复：负收益导致 nonnegative 抛错整页崩溃；USDT 现金按面值计入成本（盈亏 0），只有证券成本存在才声明已核实。
+- 成本缺失：生产 UI 不再提供放行开关，正式资料库保持阻断；allowUnknownCost 仅用于虚构测试，smoke 检查包内无放行文案。
+- 验证：254 项测试通过（+5 汇率/负收益），tsc 0 错，verify 全通过；虚构预览确认汇率显示"1.000000 · 最新记录"。
+- 下一步：本人在独立测试资料库安装 0.3.2 核对汇率与原生写入；Astra 复核汇率回退与成本口径。
+
+## v0.3.1 原生集成深度验收（历史）
 
 - 基线 4dc3df1（0.3.0）；工作树 F:\Code\wrisk-ds，分支 review/ds-0.2.1，未推送。
 - 源码结论（Wealthfolio v3.10.0 holdings_valuation_service）：缺报价→市值 0；缺汇率→静默按 1.0；无报价 TTL；未实现盈亏 = 市值 − Position 成本，缺 averageCost 时宿主按 0。

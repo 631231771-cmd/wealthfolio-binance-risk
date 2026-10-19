@@ -58,6 +58,8 @@ assert.deepEqual(manifest.permissions.map(p=>p.category),['secrets','files','net
 // 原生写入不得包含删除或组合重算能力。
 assert.ok(!manifest.permissions.find(p=>p.category==='snapshots').functions.includes('delete'));
 assert.ok(!manifest.permissions.some(p=>['portfolio','activities','market-data'].includes(p.category)));
+// 正式包不得提供“成本未知仍可写入”的放行开关。
+assert.ok(!bundle.includes('允许这些资产仅导入数量'));
 assert.deepEqual(manifest.network,{allowedHosts:['data-api.binance.vision','api.binance.com']});
 assert.ok(!/WRISKDEMO_BTC/.test(bundle));
 assert.ok(html.includes('真实市场报价 + 模拟持仓'));

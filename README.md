@@ -6,6 +6,8 @@
 
 ## 当前状态
 
+**v0.3.2 汇率修复：** 修复真实宿主中"USDT → 基础货币：不可用"的误报。根因是 Wealthfolio 3.10.0 按日期的汇率接口只接受 3 位货币代码，`USDT` 被 `InvalidCurrencyCode` 拒绝；插件现改为日期接口失败后回退到 `exchangeRates.getAll()` 的最新手动汇率，并支持反向汇率，绝不默认 1。页面新增只读汇率诊断（有效/较旧/无记录/无法解析/权限不足/接口不可用）。同时修复负收益导致整页崩溃、USDT 现金被误判为缺成本两个缺陷。缺成本在正式资料库仍保持阻断，生产包不提供放行开关。详见[修复说明](docs/PRODUCT-0.3.2.md)。
+
 **v0.3.1 原生集成硬化：** 依据 Wealthfolio v3.10.0 估值源码补齐三道门槛：成本缺失默认阻断（宿主会把缺失成本当 0，产生虚假盈亏）、绑定账户必须是 CRYPTOCURRENCY · HOLDINGS、USDT→基础货币汇率缺失时阻断。账户绑定持久化到插件存储，用户改名后不会重复建账户；读回失败返回"已提交·未读回"而不重试；报价失败明确提示原生按 0 估值。详见[深度验收](docs/PRODUCT-0.3.1.md)。
 
 **v0.3.0 原生账户同步：** Binance Spot 持仓可写入 Wealthfolio 原生的 CRYPTOCURRENCY · HOLDINGS 账户：USDT 作为现金，其余资产映射为 CRYPTO/USDT，成本写入 averageCost，报价通过官方 quotes 接口推送。写入必须本人先检测宿主能力、生成导入预览、核对后勾选确认；同日重复同步覆盖当日快照，不重复建账户。新增 accounts/snapshots/quotes/currency/settings 权限，未申请删除或组合重算。详见[原生同步说明](docs/PRODUCT-0.3.0.md)。

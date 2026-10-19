@@ -21,7 +21,7 @@ export interface CostSummary {
 }
 export function costSummary(state:PortfolioState,report:ReturnType<typeof calculateRisk>,book:CostBook):CostSummary{
   const rows:CostRow[]=[],issues:('MISSING_COST'|'MISSING_PRICE')[]=[];
-  let knownValue=new Decimal(0),costTotal=new Decimal(0),gainTotal=new Decimal(0),pricedRows=0,costedRows=0;
+  let knownValue=new Decimal(0),costTotal=new Decimal(0),gainTotal=new Decimal(0),pricedRows=0,costedRows=0,securityCosts=0;
   for(const snapshot of Object.values(state.snapshots)){
     for(const position of snapshot.positions){
       const code=position.asset.code;
@@ -29,6 +29,8 @@ export function costSummary(state:PortfolioState,report:ReturnType<typeof calcul
       const value=eligible?report.assetValues[assetKey(position.asset)]:undefined;
       const entry=book[code];
       let unitCost:Decimal|undefined;
+      // USDT 现金按面值计价：宿主把现金成本视为市值，盈亏恒 0，不需要用户录入成本。
+      if(entry===undefined&&code==='USDT'&&position.asset.quoteCurrency==='USDT')unitCost=new Decimal(1);
       if(entry!==undefined){
         try{const unit=nonnegative(entry.unitCost);if(!unit.isZero())unitCost=unit;}
         catch{unitCost=undefined;}
@@ -38,7 +40,7 @@ export function costSummary(state:PortfolioState,report:ReturnType<typeof calcul
       const gain=cost&&value!==undefined?new Decimal(value).sub(cost):undefined;
       if(value!==undefined)pricedRows++;
       else issues.push('MISSING_PRICE');
-      if(unitCost)costedRows++;
+      if(unitCost){costedRows++;if(!(code==='USDT'&&entry===undefined))securityCosts++;}
       else issues.push('MISSING_COST');
       if(value!==undefined&&cost){
         knownValue=knownValue.add(value);costTotal=costTotal.add(cost);gainTotal=gainTotal.add(gain!);
@@ -54,7 +56,8 @@ export function costSummary(state:PortfolioState,report:ReturnType<typeof calcul
   }
   const totalValue=report.coveredSubtotal;
   const complete=pricedRows===rows.length&&costedRows===rows.length&&rows.length>0;
-  const anyKnown=costedRows>0&&knownValue.gt(0);
+  const onlyCash=rows.length>0&&rows.every(r=>r.code==='USDT');
+  const anyKnown=(securityCosts>0||onlyCash)&&knownValue.gt(0);
   return {
     rows,totalValue,knownValue:knownValue.toFixed(8),
     cost:anyKnown?costTotal.toFixed(8):null,

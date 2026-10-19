@@ -76,7 +76,7 @@ export function describeRetry(retry:DirectRetry){
     default:return '可手动刷新';
   }
 }
-export function DirectSpotPanel({reader,credentials,onOpenDeveloper,host}:{reader:DirectSpot;credentials:BinanceCredentials;onOpenDeveloper?:()=>void;host?:NativeHostBridge}) {
+export function DirectSpotPanel({reader,credentials,onOpenDeveloper,host,nativeInitialCosts}:{reader:DirectSpot;credentials:BinanceCredentials;onOpenDeveloper?:()=>void;host?:NativeHostBridge;nativeInitialCosts?:CostBook}) {
   const [,render]=useState(0),[costs,setCosts]=useState<CostBook>({}),[message,setMessage]=useState(''),[saved,setSaved]=useState(false),[saving,setSaving]=useState(false),[settings,setSettings]=useState(false),[autoConsent,setAutoConsent]=useState(false);
   const key=useRef<HTMLInputElement>(null),secret=useRef<HTMLInputElement>(null),uid=useRef<HTMLInputElement>(null);
   const risk=useRef<HTMLInputElement>(null),small=useRef<HTMLInputElement>(null),permissions=useRef<HTMLInputElement>(null),ai=useRef<HTMLInputElement>(null),reconciled=useRef<HTMLInputElement>(null);
@@ -126,7 +126,7 @@ export function DirectSpotPanel({reader,credentials,onOpenDeveloper,host}:{reade
       <span className={'quote-line'+(quoteSeverity==='error'?' notice-error':quoteSeverity==='warning'?' notice-warning':'')} role="status"><i className={'status-dot '+(status.connected?'is-on':'')}/>{quoteLine}{quoteDiagnostic&&quoteSeverity==='error'&&<button className="button-quiet" onClick={()=>setSettings(true)}>查看原因</button>}</span>
       {status.success&&<details className="auto-options"><summary>余额：{status.auto?'自动 · 每5分钟':'手动'} <span>⌄</span></summary><div><strong>本次会话自动同步</strong><p>每5分钟同步余额。切页或最小化暂停。</p><label className="check-label"><input ref={reconciled} type="checkbox" checked={autoConsent} onChange={e=>setAutoConsent(e.target.checked)}/>我已逐项核对本次持仓，同意自动同步余额。</label><button disabled={status.busy||saving||(!status.auto&&!autoConsent)} onClick={()=>void work(async()=>reader.setAuto(!status.auto,!!reconciled.current?.checked))}>{status.auto?'关闭余额自动同步':'确认开启 · 每5分钟'}</button></div></details>}
     </div>
-    <PortfolioOverview value={{state,report}} reference={reader.getReference?.()} costs={costs} nativePanel={host?<NativePanel reader={reader} host={host} onCosts={setCosts}/>:undefined}/>
+    <PortfolioOverview value={{state,report}} reference={reader.getReference?.()} costs={costs} nativePanel={host?<NativePanel reader={reader} host={host} onCosts={setCosts} initialCosts={nativeInitialCosts}/>:undefined}/>
     <footer className="monitor-footer"><span>仅 Spot · USDT 计价 · 只读</span><span className="build-label">Binance Risk {version} · {build}</span></footer>
     <details className="connection-settings" open={settings} onToggle={e=>setSettings(e.currentTarget.open)}><summary>连接设置</summary><div className="settings-content">
       <div className="section-heading"><h2>只读账户连接</h2><button className="button-quiet" onClick={()=>setSettings(false)}>收起</button></div>

@@ -129,3 +129,54 @@ export function reconcilePlan(plan:NativePlan,actual:NativeActualHolding[]){
   const extra=actual.map(r=>r.symbol).filter(symbol=>!expected.has(symbol));
   return {ok:mismatched.length===0&&missing.length===0,matched,mismatched,missing,extra};
 }
+
+// 汇率解析：宿主按日期查询只接受 3 位 ISO 代码，USDT 会被 InvalidCurrencyCode 拒绝。
+// 因此先试日期接口，再回退到 exchangeRates.getAll() 的最新记录；绝不默认 1。
+export interface RateRecord {fromCurrency:string;toCurrency:string;rate:number|string;source?:string;timestamp?:string}
+export type RateStatus='valid'|'stale'|'no-record'|'unparseable'|'api-unavailable'|'permission-denied';
+export interface RateResolution {
+  rate:number|null;
+  status:RateStatus;
+  source:'same'|'dated'|'latest'|'inverse'|null;
+  asOf?:string;
+}
+const STALE_DAYS=7;
+function positiveRate(value:number|string|undefined|null):number|null{
+  if(value===undefined||value===null)return null;
+  const n=typeof value==='number'?value:Number(value);
+  return Number.isFinite(n)&&n>0?n:null;
+}
+export function classifyRateError(error:unknown):'permission-denied'|'api-unavailable'{
+  const message=error instanceof Error?error.message:String((error as {message?:unknown})?.message??error??'');
+  return /permission|denied|not allowed|unauthorized|forbidden|eacces/i.test(message)?'permission-denied':'api-unavailable';
+}
+export function resolveUsdtRate(args:{
+  base:string;
+  date:string;
+  dated?:{rate:number|null;error?:string|null}|null;
+  datedError?:unknown;
+  records?:RateRecord[]|null;
+  listError?:unknown;
+  now?:string;
+}):RateResolution{
+  const base=args.base.trim().toUpperCase();
+  if(base==='USDT')return {rate:1,status:'valid',source:'same'};
+  const dated=positiveRate(args.dated?.rate??null);
+  if(dated!==null)return {rate:dated,status:'valid',source:'dated',asOf:args.date};
+  const records=args.records??[];
+  const direct=records.find(r=>r.fromCurrency?.trim().toUpperCase()==='USDT'&&r.toCurrency?.trim().toUpperCase()===base);
+  const inverse=records.find(r=>r.fromCurrency?.trim().toUpperCase()===base&&r.toCurrency?.trim().toUpperCase()==='USDT');
+  const pick=direct??inverse;
+  if(pick){
+    const raw=positiveRate(pick.rate);
+    if(raw===null)return {rate:null,status:'unparseable',source:null,asOf:pick.timestamp};
+    const rate=direct?raw:1/raw;
+    const asOf=pick.timestamp;
+    const age=asOf?Date.parse(args.now??new Date().toISOString())-Date.parse(asOf):NaN;
+    const stale=Number.isFinite(age)&&age>STALE_DAYS*86_400_000;
+    return {rate,status:stale?'stale':'valid',source:direct?'latest':'inverse',...(asOf?{asOf}:{})};
+  }
+  if(args.listError!==undefined&&args.listError!==null)return {rate:null,status:classifyRateError(args.listError),source:null};
+  if(args.datedError!==undefined&&args.datedError!==null)return {rate:null,status:classifyRateError(args.datedError),source:null};
+  return {rate:null,status:'no-record',source:null};
+}
