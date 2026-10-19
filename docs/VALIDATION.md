@@ -470,3 +470,12 @@ main/v0.1.3 保存基线提交 91f3432；本轮 feature/spot-readonly-offline �
 - 浏览器虚构预览实际检查 11 个场景（完整、USDC 主仓、余额过期、报价过期、部分缺价、报价失败、余额失败、多微额、零余额、420px、920px），Chrome headless 加载本地构建，无 SDK、无网络。**不是 Wealthfolio 实机验收。**
 - 100 资产渲染路径基准 0.54ms/次（merge + risk + presentation），因此未引入状态管理框架。
 - 未验证：真实宿主安装、真实 UID/余额/USDC 估值、自动刷新实机行为、Windows 窄窗主观体验。
+
+## v0.3.0 原生账户同步与成本基础（2026-10-19）
+
+- 基线 `81a1781`；工作树 `F:\Code\wrisk-ds`，分支 review/ds-0.2.1。原生契约依据 SDK 3.9.0 类型与 Wealthfolio v3.10.0 源码（manual_snapshot_service / assets_service / holdings_import_validation）：CRYPTO 资产身份为 `CRYPTO:SYMBOL/QUOTE`，`averageCost` 写入成本，HOLDINGS 账户读自持快照，快照按账户+日期 upsert。
+- 新增 25 项测试：`native-sync` 12（映射/身份/去重/预览/写入/读回/幂等/MANUAL 跳过）、`cost-basis` 5（完整/部分/无成本/缺价/非法值）、`trade-cost` 5（FIFO/手续费/第三币/超卖/余额对账）、`native-panel` 3（无宿主/有宿主/成本空态）。全量 **244 项通过**，tsc 0 错。
+- **完整 npm run verify 通过**：244 测试、build、ZIP、smoke（含权限白名单断言）、receipt、13 项原生虚构自检与快照交接。
+- ZIP `artifacts/wealthfolio-binance-risk-0.3.0.zip`，SHA256 `075d7b4794ad5d685da0dd11a86ff4db5630f91d1557689e0bc10bada44a2a86`；回执 `BUILD-RECEIPT-0.3.0.json`（trackedChanges=false，源码指纹 `ed9f68e3…`）。
+- 虚构宿主端到端（Chrome headless 加载本地预览，内存 host）：检测能力 → 预览（5 持仓 + USDT 现金）→ 勾选 → 写入 → 读回 5 项一致 → 报价 5 项。**未对真实资料库写入，未发送任何私人请求。**
+- 未验证：真实宿主的 accounts/snapshots/quotes 行为、USDT→基础货币汇率是否已存在、原生仪表盘的实际显示与总额。
