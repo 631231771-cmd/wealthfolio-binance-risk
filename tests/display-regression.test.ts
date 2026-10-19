@@ -208,9 +208,9 @@ function panel(diagnostic:DirectDiagnostic,quoteRetry:DirectRetry,success=true){
 }
 test('报价失败、退避与限流时，页面不冒充刚刚更新成功',()=>{
  const cases:[DirectDiagnostic,DirectRetry,string,string][]=[
-  [{stage:'quotes',code:'QUOTE_REQUEST_FAILED',quote:quoteResult('request-failed',{failedRequestCount:1})},retry('backoff',120),'公开行情更新失败','行情等待重试 · 120秒'],
-  [{stage:'quotes',code:'QUOTE_RATE_LIMIT',quote:quoteResult('request-failed',{failedRequestCount:1})},retry('exchange-limit',60),'公开行情受到限流','行情等待限流冷却 · 60秒'],
-  [{stage:'quotes',code:'QUOTE_TIMEOUT',quote:quoteResult('request-failed')},retry('backoff',240),'公开行情等待超时','行情等待重试 · 240秒'],
+  [{stage:'quotes',code:'QUOTE_REQUEST_FAILED',quote:quoteResult('request-failed',{failedRequestCount:1})},retry('backoff',120),'公开行情更新失败','120 秒后重试'],
+  [{stage:'quotes',code:'QUOTE_RATE_LIMIT',quote:quoteResult('request-failed',{failedRequestCount:1})},retry('exchange-limit',60),'公开行情受到限流','限流冷却 60 秒'],
+  [{stage:'quotes',code:'QUOTE_TIMEOUT',quote:quoteResult('request-failed')},retry('backoff',240),'公开行情等待超时','240 秒后重试'],
  ];
  for(const [diagnostic,quoteRetry,title,cadence] of cases){
   const html=panel(diagnostic,quoteRetry),header=html.split('class="monitor-toolbar"')[0];
@@ -224,7 +224,7 @@ test('报价失败、退避与限流时，页面不冒充刚刚更新成功',()=
 test('报价正常时仍明确显示每分钟更新，失败与成功文案互斥',()=>{
  const html=panel({stage:'quotes',code:'QUOTE_COMPLETE',quote:quoteResult('complete',{pricedCount:3})},retry('ready'));
  assert.ok(html.includes('公开行情已更新'));
- assert.ok(html.includes('行情每分钟更新'));
+ assert.ok(html.includes('· 每分钟'));
  assert.equal(html.includes('行情等待重试'),false);
  assert.equal(html.includes('公开行情更新失败'),false);
 });

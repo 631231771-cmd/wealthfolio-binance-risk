@@ -1,6 +1,15 @@
 # 当前状态
 
-## v0.2.1 产品精修（2026-10-19）
+## v0.2.2 数据可信度与界面精修（2026-10-19）
+
+- 基线 dd438c6（0.2.1）；全部改动在独立工作树 F:\Code\wrisk-ds，分支 review/ds-0.2.1，未触碰共享目录的受版本控制文件。
+- 报价：失败不再清空 120 秒 TTL 内的已验证报价；结果拆为 priced/retained/missingQuote/noMarket/failedRequest，只有请求级失败驱动退避；-1220 归暂时缺价；首次重试 30 秒（60/120/240，上限 300）；页面隐藏只 pause，不销毁价格。
+- 历史：balanceIdentity = 账户+来源+资产+数量（不含时间），同数量新时间可复用上次估值；数量/构成变化不复用；完整记录不被同余额部分估值降级；历史保留原余额/报价/记录时间。
+- 展示：六态（live/live-partial/history-complete/history-partial/zero/unavailable）+ heroLabel 唯一口径；顶部合并为一行行情状态；移除占位盈亏；微额改为表头开关；数量/价格统一格式；详情显示可用/锁定。
+- 验证：219 项测试通过（新增 tests/quote-reliability.test.ts 14 项；调整 4 项锁定旧清空行为的断言），tsc 0 错；npm run verify 结果见 docs/VALIDATION.md 最新节。未发真实账户请求。
+- 下一步：本人安装 0.2.2 核对页脚版本/指纹与真实 USDC 估值；Astra 独立审核本轮 diff。
+
+## v0.2.1 产品精修（历史）
 
 - 基线391f85b4ecce4f7a3bd3809f5e95ebee3a55d919，feature/dynamic-spot-quotes；开始时本地/远端一致且工作区干净。
 - 当前估值与历史展示分离。整份估值记录保留数量/报价/总值/覆盖/时间，过期后排序、配置和可靠微额折叠不跳变；历史不参与当前风险。新余额缺价不逐行借用旧值。
@@ -10,7 +19,7 @@
 - 产物artifacts/wealthfolio-binance-risk-0.2.1.zip，回执BUILD-RECEIPT-0.2.1.json；本地截图artifacts/ui-0.2.1/，均不入Git。旧版本安装包保留。历史只在内存，成本仍未知。
 - 本轮未收到任务所提两张Windows截图，也未观察真实持仓页面。产品规则和验证证据见docs/PRODUCT-0.2.1.md与docs/VALIDATION.md。
 
-## 下一步唯一优先任务
+## v0.2.1 下一步（已被 v0.2.2 覆盖）
 
 等待本人在独立测试资料库验收0.2.1：核对版本/指纹、真实余额与估值、自然过期的历史配置/微额、本人开启自动余额同步及切页返回。不要自行发真实请求或开始成本接口开发；仅回报脱敏结论。
 

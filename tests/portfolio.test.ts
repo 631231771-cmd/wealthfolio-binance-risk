@@ -33,10 +33,10 @@ test('USDC占多数的虚构账户：市场报价、精确数量、估值、微�
  assert.equal(view.allocation.length,4);assert.equal(view.rows.length,5);
  const html=renderToStaticMarkup(createElement(PortfolioOverview,{value}));
  assert.ok(html.includes('12,734.43'));assert.ok(html.includes('4 / 5 项已估值'));assert.ok(html.includes('成本尚未核实'));assert.ok(!html.includes('压力情景损失'));
- assert.match(html,/<details class="dust">/);assert.ok(html.includes('NOPAIR'));
+ assert.match(html,/class="dust-toggle"/);assert.ok(html.includes('NOPAIR'));
  const reference={...value,at},failed=structuredClone(state);failed.statuses[account.id].state='failed' as any;
  const stale={state:failed,report:spotRisk(failed,now+400_000)};
- const historical=renderToStaticMarkup(createElement(PortfolioOverview,{value:stale,reference,history:reader.getHistoricalQuotes()}));
+ const historical=renderToStaticMarkup(createElement(PortfolioOverview,{value:stale,reference}));
  assert.ok(historical.includes('上次部分估值'));assert.ok(historical.includes('历史 · 部分覆盖'));assert.ok(historical.includes('12,734.43'));assert.ok(historical.includes('当时仅部分覆盖'));assert.equal(stale.report.coveredSubtotal,null);
  assert.equal(portfolioView(stale).dust.length,0); // Raw current risk remains unavailable; only the coherent presentation may use history.
 });
@@ -83,7 +83,7 @@ test('过期展示冻结的整份估值：总值、排序、数量、配置、�
  assert.equal(after.displayed.report.coveredSubtotal,'1508.02000000');assert.equal(stale.report.coveredSubtotal,null);assert.equal(stale.report.stressLoss,null);
  assert.ok(after.view.visible.some(r=>r.code==='NOPAIR'));assert.equal(after.view.complete,false);
  const html=renderToStaticMarkup(createElement(PortfolioOverview,{value:stale,reference}));
- assert.match(html,/历史资产配置/);assert.match(html,/当时仅部分覆盖/);assert.match(html,/微额资产 · 1 项/);assert.match(html,/已计入当时总值/);assert.match(html,/不代表当前资产/);
+ assert.match(html,/历史资产配置/);assert.match(html,/当时仅部分覆盖/);assert.match(html,/微额 1 项/);assert.match(html,/已计入当时总值/);assert.match(html,/不代表当前资产/);
  assert.doesNotMatch(html,/暂无有效配置比例/);assert.match(html,/占比仅以这部分市值为分母/);
 });
 test('报价全部失效仅USDT仍可计价时，历史视图不把USDT小计冒充完整总值',()=>{
@@ -100,7 +100,7 @@ test('更新后的余额不可与旧价按行拼接；新缺价持仓不能按�
  for(const p of snapshot.positions)if(p.asset.code!=='USDT')delete p.price;
  const current={state,report:spotRisk(state,now+60_000)},shown=portfolioPresentation(current,reference);
  assert.equal(shown.historical,false);assert.equal(shown.view.dust.length,0);assert.ok(shown.view.visible.some(r=>r.code==='DUST'&&r.quantity==='9000'&&r.value===undefined));
- const html=renderToStaticMarkup(createElement(PortfolioOverview,{value:current,reference,history:new Map([['DUST',{value:'0.01',asOf:at,currency:'USDT',source:'external:test'}]])}));
+ const html=renderToStaticMarkup(createElement(PortfolioOverview,{value:current,reference}));
  assert.doesNotMatch(html,/历史市值/);assert.match(html,/9000/);assert.match(html,/10.00/);
 });
 test('数量变更即使时间相同也不复用旧记录；不同账户记录不匹配',()=>{
@@ -135,7 +135,7 @@ test('初次未估值或过期且没有可靠记录时，不用散落历史价�
  const value=example(),stale={state:structuredClone(value.state),report:spotRisk(value.state,now+400_000)};
  const view=portfolioPresentation(stale);
  assert.equal(view.historical,false);assert.equal(view.displayed.report.coveredSubtotal,null);assert.equal(view.view.dust.length,0);assert.ok(view.view.rows.every(r=>r.price===undefined));
- const html=renderToStaticMarkup(createElement(PortfolioOverview,{value:stale,history:new Map([['USDC',{value:'1',asOf:at,currency:'USDT',source:'external:test'}]])}));
+ const html=renderToStaticMarkup(createElement(PortfolioOverview,{value:stale}));
  assert.match(html,/aria-label="不可用"/);assert.doesNotMatch(html,/1,508.02/);assert.doesNotMatch(html,/历史市值/);
 });
 test('微额边界与缺价分开：0.1不折叠，微额合计保留精确分母',()=>{

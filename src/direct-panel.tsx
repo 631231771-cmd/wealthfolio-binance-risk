@@ -2,7 +2,6 @@ import { useState,useRef,useEffect } from 'react';
 import {READ_ONLY_FIELDS,type DirectSpot,type DirectDiagnostic,type DirectRetry,type TimeObservation} from './direct-spot';
 import type { BinanceCredentials } from './credentials';
 import {SPOT_VALIDATION_REASONS,isSafeValidationPath} from './spot';
-import {nonnegative} from './domain';
 import {PortfolioOverview} from './portfolio-overview';
 import {version} from '../package.json';
 declare const __WRISK_BUILD__:string;
@@ -74,8 +73,6 @@ export function describeRetry(retry:DirectRetry){
     default:return '可手动刷新';
   }
 }
-export const formatPrice=(v:string)=>nonnegative(v).toFixed();
-
 export function DirectSpotPanel({reader,credentials,onOpenDeveloper}:{reader:DirectSpot;credentials:BinanceCredentials;onOpenDeveloper?:()=>void}) {
   const [,render]=useState(0),[message,setMessage]=useState(''),[saved,setSaved]=useState(false),[saving,setSaving]=useState(false),[settings,setSettings]=useState(false),[autoConsent,setAutoConsent]=useState(false);
   const key=useRef<HTMLInputElement>(null),secret=useRef<HTMLInputElement>(null),uid=useRef<HTMLInputElement>(null);
@@ -83,18 +80,31 @@ export function DirectSpotPanel({reader,credentials,onOpenDeveloper}:{reader:Dir
   const {state,report}=reader.valued(),status=reader.getStatus(),diagnostic=reader.getDiagnostic(),detail=describeDiagnostic(diagnostic);
   const snapshots=Object.values(state.snapshots),hasSnapshot=snapshots.length>0;
   const quoteDiagnostic=diagnostic.stage==='quotes',quoteCode=quoteDiagnostic?detail.code:'';
-  const quoteSeverity: 'success'|'info'|'warning'|'error'=quoteCode==='QUOTE_COMPLETE'?'success':
-    ['QUOTE_NO_MARKET','QUOTE_NO_CANDIDATES','QUOTE_DISCONNECTED','QUOTE_BUSY','RUNNING'].includes(quoteCode)?'info':
-    ['QUOTE_PARTIAL','QUOTE_BUDGET_LIMITED'].includes(quoteCode)?'warning':'error';
   const quoteTitle:Record<string,string>={
-    QUOTE_COMPLETE:'公开行情已更新',QUOTE_NO_MARKET:'公开行情说明',QUOTE_NO_CANDIDATES:'公开行情说明',
+    QUOTE_COMPLETE:'公开行情已更新',QUOTE_NO_MARKET:'无 USDT 市场的资产',QUOTE_NO_CANDIDATES:'无需要报价的资产',
     QUOTE_PARTIAL:'公开行情部分可用',QUOTE_BUDGET_LIMITED:'公开行情覆盖受限',
     QUOTE_REQUEST_FAILED:'公开行情更新失败',QUOTE_TIMEOUT:'公开行情等待超时',QUOTE_RATE_LIMIT:'公开行情受到限流',
     QUOTE_INVALID:'公开行情响应无效',QUOTE_DISCONNECTED:'公开行情已暂停',QUOTE_BUSY:'公开行情请求进行中',RUNNING:'正在更新公开行情'
   };
+  // 一个状态行同时回答"行情是否新鲜 / 多久后重试"；不再与独立提示条重复。
+  const quoteCounts=diagnostic.quote;
+  const quoteSeverity:'success'|'info'|'warning'|'error'=quoteCode==='QUOTE_COMPLETE'?'success'
+    :['QUOTE_REQUEST_FAILED','QUOTE_TIMEOUT','QUOTE_RATE_LIMIT','QUOTE_INVALID','QUOTES_UNAVAILABLE'].includes(quoteCode)?'error'
+    :['QUOTE_PARTIAL','QUOTE_BUDGET_LIMITED'].includes(quoteCode)?(quoteCode==='QUOTE_BUDGET_LIMITED'||(quoteCounts&&(quoteCounts.missingQuoteCount>0||quoteCounts.unexaminedCount>0||quoteCounts.failedRequestCount>0))?'warning':'info')
+    :'info';
   const label=status.busy&&!quoteDiagnostic?'同步中':!status.connected?(hasSnapshot?'已断开':'未连接'):status.success?'已连接':'待验证';
   const quoteRetry=status.quoteRetry??status.retry;
-  const publicRefresh=quoteRetry.reason==='exchange-limit'?`行情等待限流冷却 · ${quoteRetry.waitSeconds}秒`:quoteRetry.reason==='backoff'?`行情等待重试 · ${quoteRetry.waitSeconds}秒`:'行情每分钟更新 · 页面可见时';
+  const quoteWait=quoteRetry.reason==='exchange-limit'?`限流冷却 ${quoteRetry.waitSeconds} 秒`
+    :quoteRetry.reason==='backoff'?`${quoteRetry.waitSeconds} 秒后重试`:'';
+  const quoteDetail=quoteCounts?[
+    quoteCounts.missingQuoteCount>0?`${quoteCounts.missingQuoteCount} 项暂缺报价`:'',
+    quoteCounts.retainedCount>0?`${quoteCounts.retainedCount} 项沿用有效期报价`:'',
+    quoteCounts.noMarketCount>0?`${quoteCounts.noMarketCount} 项无 USDT 市场`:''
+  ].filter(Boolean).join(' · '):'';
+  const steady=['QUOTE_COMPLETE','QUOTE_PARTIAL','QUOTE_BUDGET_LIMITED'].includes(quoteCode);
+  const quoteLine=quoteDiagnostic
+    ? [quoteTitle[quoteCode]??'公开行情状态',quoteDetail,steady?'每分钟':quoteWait].filter(Boolean).join(' · ')
+    : status.success?'行情每分钟更新 · 页面可见时':'只读连接 · 凭据保存在本机';
   const healthy=label==='已连接',hasError=!['NOT_CONNECTED','RUNNING','OK','USER_DISCONNECTED','PAGE_PAUSED'].includes(detail.code)&&!quoteDiagnostic;
   const mainMessage=detail.code==='HOST_REQUEST_FAILED'?'连接请求未完成，上次资产记录仍保留。请查看原因与重试时间。':detail.code==='SPOT_TIMEOUT'?'本次请求等待超时，上次资产记录仍保留。请等待重试提示。':detail.text;
   useEffect(()=>{if(!status.connected||!status.success)setAutoConsent(false);},[status.connected,status.success]);
@@ -109,9 +119,11 @@ export function DirectSpotPanel({reader,credentials,onOpenDeveloper}:{reader:Dir
   return <section className="monitor" aria-label="真实Spot资产监控">
     <header className="monitor-header"><div className="workspace-title"><span className="exchange-mark" aria-hidden="true">◇</span><div><p className="eyebrow">BINANCE / SPOT</p><h1>我的资产</h1></div><span className={'status-badge '+(hasError?'is-error':healthy?'is-good':'is-neutral')}>{hasError&&status.connected?'更新未完成':label}</span></div><div className="button-row"><button disabled={!status.retry.canRetry||saving} title={describeRetry(status.retry)} onClick={()=>void work(()=>reader.sync())}>{status.busy&&!quoteDiagnostic?'同步中…':'同步余额'}</button><button disabled={!status.success||!quoteRetry.canRetry||saving} title={describeRetry(quoteRetry)} onClick={()=>void work(()=>reader.refreshQuotes())}>{status.busy&&quoteDiagnostic?'更新中…':'刷新行情'}</button><button className="button-quiet" onClick={()=>setSettings(v=>!v)} aria-expanded={settings}>连接设置</button></div></header>
     {(!hasSnapshot||hasError||!status.connected)&&<div className={'connection-notice '+(hasError?'notice-error':'')} role="status"><div><strong>{hasError?detail.stage+'未完成':status.busy?detail.stage:hasSnapshot?'已断开 · 保留上次持仓':'连接你的币安账户'}</strong><p>{mainMessage}</p>{hasError&&<code>{detail.stage} · {detail.code}{detail.code==='SPOT_INVALID'&&detail.metadata?' · '+detail.metadata:''}</code>}</div><button onClick={()=>setSettings(true)}>查看连接设置</button></div>}
-    {quoteDiagnostic&&<div className={'quote-health'+(quoteSeverity==='error'?' notice-error':quoteSeverity==='warning'?' notice-warning':'')} data-quote-state={quoteSeverity} role="status"><span>{quoteTitle[quoteCode]??'公开行情状态'}{quoteSeverity==='error'?' · 余额数量保留，报价等待重试':''}</span>{quoteSeverity==='error'&&<button className="button-quiet" onClick={()=>setSettings(true)}>查看原因</button>}</div>}
-    <div className="monitor-toolbar"><span><i className={'status-dot '+(status.connected?'is-on':'')}/>{status.success?publicRefresh:'只读连接 · 凭据保存在本机'}</span>{status.success&&<details className="auto-options"><summary>余额：{status.auto?'自动 · 每5分钟':'手动'} <span>⌄</span></summary><div><strong>本次会话自动同步</strong><p>每5分钟同步余额。切页或最小化暂停。</p><label className="check-label"><input ref={reconciled} type="checkbox" checked={autoConsent} onChange={e=>setAutoConsent(e.target.checked)}/>我已逐项核对本次持仓，同意自动同步余额。</label><button disabled={status.busy||saving||(!status.auto&&!autoConsent)} onClick={()=>void work(async()=>reader.setAuto(!status.auto,!!reconciled.current?.checked))}>{status.auto?'关闭余额自动同步':'确认开启 · 每5分钟'}</button></div></details>}</div>
-    <PortfolioOverview value={{state,report}} reference={reader.getReference?.()} history={reader.getHistoricalQuotes?.()}/>
+    <div className="monitor-toolbar" data-quote-state={quoteDiagnostic?quoteSeverity:undefined}>
+      <span className={'quote-line'+(quoteSeverity==='error'?' notice-error':quoteSeverity==='warning'?' notice-warning':'')} role="status"><i className={'status-dot '+(status.connected?'is-on':'')}/>{quoteLine}{quoteDiagnostic&&quoteSeverity==='error'&&<button className="button-quiet" onClick={()=>setSettings(true)}>查看原因</button>}</span>
+      {status.success&&<details className="auto-options"><summary>余额：{status.auto?'自动 · 每5分钟':'手动'} <span>⌄</span></summary><div><strong>本次会话自动同步</strong><p>每5分钟同步余额。切页或最小化暂停。</p><label className="check-label"><input ref={reconciled} type="checkbox" checked={autoConsent} onChange={e=>setAutoConsent(e.target.checked)}/>我已逐项核对本次持仓，同意自动同步余额。</label><button disabled={status.busy||saving||(!status.auto&&!autoConsent)} onClick={()=>void work(async()=>reader.setAuto(!status.auto,!!reconciled.current?.checked))}>{status.auto?'关闭余额自动同步':'确认开启 · 每5分钟'}</button></div></details>}
+    </div>
+    <PortfolioOverview value={{state,report}} reference={reader.getReference?.()}/>
     <footer className="monitor-footer"><span>仅 Spot · USDT 计价 · 只读</span><span className="build-label">Binance Risk {version} · {build}</span></footer>
     <details className="connection-settings" open={settings} onToggle={e=>setSettings(e.currentTarget.open)}><summary>连接设置</summary><div className="settings-content">
       <div className="section-heading"><h2>只读账户连接</h2><button className="button-quiet" onClick={()=>setSettings(false)}>收起</button></div>

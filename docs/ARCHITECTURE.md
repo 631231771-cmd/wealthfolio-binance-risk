@@ -1,5 +1,9 @@
 # 架构与边界
 
+## v0.2.2 数据可信度增量
+
+`SpotQuoteReader` 的结果从单一 `pricedCount` 拆成"新报价 / 沿用旧价 / 暂时缺价 / 无市场 / 请求失败"五类；刷新失败只记录，不销毁仍在 TTL 内的报价。`pause()` 与 `disconnect()` 分离，页面隐藏不再清空价格。`DirectSpot` 的参考记录用 `balanceIdentity`（账户+来源+资产+数量，不含时间）判断能否复用，并阻止完整记录被同余额的部分估值降级。展示层新增 `valuationState`/`heroLabel`，把"当前完整、已定价小计、历史完整、历史部分、真实零、不可信"收敛为唯一口径。细节与测试矩阵见[PRODUCT-0.2.2](PRODUCT-0.2.2.md)。
+
 ## v0.2.1 当前展示模型
 
 DirectSpot仅调整会话内历史记录的发布选择与深拷贝；原认证、余额与行情请求/调度不变。portfolioPresentation在原只读portfolioView上选择整份当前/历史记录；数量和采集身份不匹配时禁止历史逐行兜底。PortfolioOverview的总值、排序、微额、配置和详情共享显示记录，风险页仍使用原当前report。

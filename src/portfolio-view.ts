@@ -35,13 +35,14 @@ export function heroLabel(state:ValuationState,hasRows:boolean){
     default:return {title:hasRows?'暂无可信估值':'Spot 已估值资产',tag:'等待更新'};
   }
 }
-export function portfolioView(value:Valuation,history:ReadonlyMap<string,Price>=new Map()){
+export function portfolioView(value:Valuation){
   const {state,report}=value;
   const rows=Object.values(state.snapshots).flatMap(snapshot=>snapshot.positions.map(position=>{
     const key=assetKey(position.asset),eligible=report.eligiblePositionKeys.includes(positionKey(snapshot.accountId,position.asset));
     const amount=eligible?report.assetValues[key]:undefined;
     return {key:positionKey(snapshot.accountId,position.asset),code:position.asset.code,quantity:position.quantity,
-      price:eligible?position.price:undefined,previousPrice:history.get(position.asset.code),value:amount,
+      free:position.balanceComponents?.free,locked:position.balanceComponents?.locked,
+      price:eligible?position.price:undefined,value:amount,
       weight:eligible?report.assetWeights[key]:undefined,balanceAt:snapshot.asOf,
       balanceCurrent:report.currentAccountIds.includes(snapshot.accountId),
       dust:amount!==undefined&&nonnegative(amount).lt('0.1')};
@@ -61,6 +62,23 @@ export function displayAmount(value:string|null|undefined,places=2){
   if(!n.isZero()&&n.lt('0.01')&&places===2)return '<0.01';
   const [whole,fraction]=n.toFixed(places).split('.');
   return whole.replace(/\B(?=(\d{3})+(?!\d))/g,',')+(fraction===undefined?'':'.'+fraction);
+}
+// 数量最多 8 位小数并保留非零含义：极小持仓显示 "<0.00000001"，绝不显示成 0。
+export function displayQuantity(value:string){
+  const n=nonnegative(value);
+  if(n.isZero())return '0';
+  if(n.lt('0.00000001'))return '<0.00000001';
+  const [whole,fraction]=n.toFixed(8).replace(/0+$/,'').replace(/\.$/,'').split('.');
+  return whole.replace(/\B(?=(\d{3})+(?!\d))/g,',')+(fraction?'.'+fraction:'');
+}
+// 价格最多 8 位有效数字，避免极小价格被舍成 0，同时大价格有千分位。
+export function displayPrice(value:string|undefined){
+  if(value===undefined)return '—';
+  const n=nonnegative(value);
+  if(n.isZero())return '0';
+  const text=n.toSignificantDigits(8).toFixed().replace(/(\.\d*?)0+$/,'$1').replace(/\.$/,'');
+  const [whole,fraction]=text.split('.');
+  return whole.replace(/\B(?=(\d{3})+(?!\d))/g,',')+(fraction?'.'+fraction:'');
 }
 export function displayPercent(v:string|undefined|null){
   if(v==null)return '—';

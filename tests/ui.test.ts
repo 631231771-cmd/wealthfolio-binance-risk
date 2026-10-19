@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import {createElement} from 'react';
 import {createRequire} from 'node:module';
 const {renderToStaticMarkup}=createRequire(import.meta.url)('react-dom/server') as {renderToStaticMarkup:(element:ReturnType<typeof createElement>)=>string};
-import {DirectSpotPanel,describeDiagnostic,describeRetry,formatPrice} from '../src/direct-panel';
+import {DirectSpotPanel,describeDiagnostic,describeRetry} from '../src/direct-panel';
 import type {DirectSpot,DirectDiagnostic} from '../src/direct-spot';
 import type {BinanceCredentials} from '../src/credentials';
 import type {SpotQuoteRefreshResult} from '../src/public-market';
 import {spotSnapshot,spotShock} from '../src/spot';
+import {displayPrice,displayQuantity} from '../src/portfolio-view';
 import {assetKey,calculateRisk,type PortfolioState} from '../src/domain';
 const at='2026-10-15T00:00:00.000Z';
 function render(state:PortfolioState,connected:boolean,success=connected,busy=false,diagnostic?:DirectDiagnostic){
@@ -41,12 +42,16 @@ test('界面区分有效零和失效历史，不显示失效资产为0',()=>{
  const stale=sample();stale.statuses[stale.accounts[0].id].state='failed' as any;const html=render(stale,false);assert.ok(html.includes('保留上次持仓'));assert.ok(html.includes('余额已失效'));assert.ok(html.includes('aria-label="不可用"'));
 });
 test('小额非零报价显示实际精度，市值仍保留两位',()=>{
- const state=sample();state.snapshots[state.accounts[0].id].positions[0].price!.value='0.000000012345';
- const html=render(state,true);assert.ok(html.includes('0.000000012345'));assert.ok(html.includes('15.00'));
+ // 数量取足以让该行不落入微额折叠，才能验证价格列本身的精度。
+ const state=sample(),position=state.snapshots[state.accounts[0].id].positions[0];
+ position.quantity='10000000';position.price!.value='0.000000012345';
+ const html=render(state,true);assert.ok(html.includes('0.000000012345'));assert.ok(html.includes('0.12'));
 });
 test('报价保留有效小数，重试原因与安全元数据不透传任意内容',()=>{
- for(const value of ['0.00000001','0.000000000000000000000000001','0.12345678','12345.6789'])assert.equal(formatPrice(value),value);
- assert.equal(formatPrice('0.00'),'0');
+ for(const value of ['0.00000001','0.000000000000000000000000001','0.12345678'])assert.equal(displayPrice(value),value);
+ assert.equal(displayPrice('12345.6789'),'12,345.679'); // 8 位有效数字，底层 Decimal 不变
+ assert.equal(displayPrice('0.00'),'0');assert.equal(displayPrice('65420'),'65,420');assert.equal(displayPrice(undefined),'—');
+ assert.equal(displayQuantity('12000'),'12,000');assert.equal(displayQuantity('0.000000000000000001'),'<0.00000001');
  assert.match(describeRetry({canRetry:false,reason:'exchange-limit',waitSeconds:90}),/交易所限流.*90秒/);
  assert.match(describeRetry({canRetry:false,reason:'backoff',waitSeconds:600}),/普通失败退避/);
  assert.match(describeRetry({canRetry:false,reason:'confirmation-required',waitSeconds:0}),/本人/);
@@ -68,14 +73,14 @@ test('余额拒绝的主提示直接呈现HTTP/JSON/字段路径/固定原因，
 test('公开行情成功不显示错误提示且余额连接仍标记已连接',()=>{
  const html=render(sample(),true,true,false,{stage:'quotes',code:'QUOTE_COMPLETE',quote:quoteResult('complete')});
  const main=html.split('class="monitor-toolbar"')[0];
- assert.match(main,/class="status-badge is-good">已连接/);assert.match(main,/data-quote-state="success"/);
- assert.ok(main.includes('公开行情已更新'));assert.ok(!main.includes('notice-error'));assert.ok(!main.includes('公开报价未完成'));
+ assert.match(main,/class="status-badge is-good">已连接/);assert.match(html,/data-quote-state="success"/);
+ assert.ok(html.includes('公开行情已更新'));assert.ok(!main.includes('notice-error'));assert.ok(!main.includes('公开报价未完成'));
 });
 
 test('无市场与无候选以中性行情信息显示，不冒充余额连接错误',()=>{
  for(const [code,status,text] of [['QUOTE_NO_MARKET','no-market','没有可用的USDT现货交易对'],['QUOTE_NO_CANDIDATES','no-candidates','没有需要查询的USDT现货交易对']] as const){
   const html=render(sample(),true,true,false,{stage:'quotes',code,quote:quoteResult(status)}),main=html.split('class="monitor-toolbar"')[0];
-  assert.match(main,/class="status-badge is-good">已连接/);assert.match(main,/data-quote-state="info"/);
+  assert.match(main,/class="status-badge is-good">已连接/);assert.match(html,/data-quote-state="info"/);
   assert.ok(html.includes(text));assert.ok(!main.includes('notice-error'));assert.ok(!main.includes('Spot余额读取未完成'));
  }
 });
@@ -83,15 +88,15 @@ test('无市场与无候选以中性行情信息显示，不冒充余额连接�
 test('部分行情和预算截断提示覆盖不足但不冒充完整成功',()=>{
  for(const [code,status,text] of [['QUOTE_PARTIAL','partial','公开行情部分可用'],['QUOTE_BUDGET_LIMITED','budget-limited','公开行情覆盖受限']] as const){
   const html=render(sample(),true,true,false,{stage:'quotes',code,quote:quoteResult(status,{pricedCount:1,unexaminedCount:1,budgetReason:status==='budget-limited'?'candidate-cap':undefined})}),main=html.split('class="monitor-toolbar"')[0];
-  assert.match(main,/data-quote-state="warning"/);assert.match(main,/notice-warning/);assert.ok(html.includes(text));assert.ok(!main.includes('notice-error'));assert.ok(!main.includes('公开行情已更新'));
+  assert.match(html,/data-quote-state="warning"/);assert.match(html,/notice-warning/);assert.ok(html.includes(text));assert.ok(!main.includes('notice-error'));assert.ok(!html.includes('公开行情已更新'));
  }
 });
 
 test('公开行情失败明确归属行情且不撤销已验证Spot连接和持仓',()=>{
  const q=quoteResult('request-failed',{marketCount:2,pricedCount:0,failedRequestCount:1,unexaminedCount:0,requestCount:3});
  const html=render(sample(),true,true,false,{stage:'quotes',code:'QUOTE_REQUEST_FAILED',quote:q}),main=html.split('class="monitor-toolbar"')[0];
- assert.match(main,/class="status-badge is-good">已连接/);assert.match(main,/公开行情更新失败/);
- assert.ok(main.includes('余额数量保留，报价等待重试'));assert.ok(html.includes('公开行情请求失败'));assert.ok(html.includes('0.001'));assert.ok(html.includes('65.00'));
+ assert.match(main,/class="status-badge is-good">已连接/);assert.ok(html.includes('公开行情更新失败'));
+ assert.ok(!html.includes('公开行情已更新'));assert.ok(html.includes('公开行情请求失败'));assert.ok(html.includes('0.001'));assert.ok(html.includes('65.00'));
  assert.ok(html.includes('2 / 3 项已估值'));assert.ok(!main.includes('Spot余额读取未完成'));
  assert.ok(html.includes('未检查候选0'));assert.ok(!main.includes('未覆盖0'));
 });
@@ -100,7 +105,7 @@ test('行情超时限流无效响应及生命周期状态不冒充余额认证�
  const cases=[['QUOTE_TIMEOUT','公开行情等待超时','error'],['QUOTE_RATE_LIMIT','公开行情受到限流','error'],['QUOTE_INVALID','公开行情响应无效','error'],['QUOTE_DISCONNECTED','公开行情已暂停','info'],['QUOTE_BUSY','公开行情请求进行中','info']] as const;
  for(const [code,title,severity] of cases){
   const html=render(sample(),true,true,false,{stage:'quotes',code}),main=html.split('class="monitor-toolbar"')[0];
-  assert.match(main,new RegExp(`data-quote-state="${severity}"`));assert.ok(main.includes(title));
+  assert.match(html,new RegExp(`data-quote-state="${severity}"`));assert.ok(html.includes(title));
   assert.match(main,/class="status-badge is-good">已连接/);assert.ok(!main.includes('Spot余额读取未完成'));
  }
 });
