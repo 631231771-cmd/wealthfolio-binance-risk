@@ -1,4 +1,4 @@
-import {assetKey,balanceIdentity,positionKey,nonnegative,type PortfolioState,type Price, type calculateRisk} from './domain';
+import {assetKey,balanceIdentity,positionKey,nonnegative,type PortfolioState,type calculateRisk} from './domain';
 
 export type Valuation={state:PortfolioState;report:ReturnType<typeof calculateRisk>};
 export type Reference=Valuation&{at:string};

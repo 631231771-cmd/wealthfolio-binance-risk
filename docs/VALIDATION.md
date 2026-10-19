@@ -466,7 +466,7 @@ main/v0.1.3 保存基线提交 91f3432；本轮 feature/spot-readonly-offline �
 - 基线 dd438c6；工作树 `F:\Code\wrisk-ds`，分支 review/ds-0.2.1；四个提交：`0e4ea1b`（报价与历史数据层）、`583173e`（界面与版本）、`fef63fd`（验证记录）、`a41b745`（全微额展开修复）。共享目录 `F:\Code\风控` 的受版本控制文件未修改。
 - 先写会失败的测试再改实现：新增 `tests/quote-reliability.test.ts` 14 项（TTL 0/30/119/120/121 秒、失败保留、30 秒退避、缺 ticker 行、-1220、无市场缓存、参考不降级、断开保留历史、身份匹配、六态标签、仅 USDT、排序稳定、微额边界）。调整 4 项锁定旧"失败即清空"行为的断言，依据见 PRODUCT-0.2.2。
 - **完整 npm run verify 实际通过**：219 项测试、tsc、vite build、ZIP/入口 smoke、构建回执、13 项原生虚构自检与原生快照→插件交接。未发真实账户或私人请求。
-- ZIP `artifacts/wealthfolio-binance-risk-0.2.2.zip`，SHA256 `e270f9167b6192cc78c64d7534f6e778de61978355bd0b266d6d35955f3168df`；回执 `BUILD-RECEIPT-0.2.2.json`（sourceCommit `a41b745`，trackedChanges=false，源码指纹 `f14a4f43…`）。manifest/package/锁文件版本均为 0.2.2。
+- ZIP `artifacts/wealthfolio-binance-risk-0.2.2.zip`，SHA256 `86e8065a40104bd99d47e2a94b5e3d3c1a28fdd1a6db2cf2be414980c3ed0749`；回执 `BUILD-RECEIPT-0.2.2.json`（sourceCommit 见文件，trackedChanges=false，源码指纹 `b7d5a4dc…`）。manifest/package/锁文件版本均为 0.2.2。
 - 浏览器虚构预览实际检查 11 个场景（完整、USDC 主仓、余额过期、报价过期、部分缺价、报价失败、余额失败、多微额、零余额、420px、920px），Chrome headless 加载本地构建，无 SDK、无网络。**不是 Wealthfolio 实机验收。**
 - 100 资产渲染路径基准 0.54ms/次（merge + risk + presentation），因此未引入状态管理框架。
 - 未验证：真实宿主安装、真实 UID/余额/USDC 估值、自动刷新实机行为、Windows 窄窗主观体验。
