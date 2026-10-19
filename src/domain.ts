@@ -49,6 +49,14 @@ export interface PortfolioState {
 export const assetKey = (a: AssetIdentity): string => JSON.stringify([a.venue, a.code, a.type, a.quoteCurrency]);
 export const positionKey = (accountId: string, asset: AssetIdentity): string => JSON.stringify([accountId,assetKey(asset)]);
 export const accountKey = (a: Account): string => JSON.stringify([a.platform, a.sourceAccountId, a.kind]);
+// 余额身份 = 账户 + 数据来源 + 资产身份 + 数量。刻意不含采集时间与批次号：
+// 同一份持仓在新时间被重新读取，仍是同一组余额事实，可以安全复用同一份估值记录。
+export function balanceIdentity(state: PortfolioState): string {
+  return JSON.stringify(Object.values(state.snapshots).map(s => [
+    s.accountId, s.dataMode,
+    s.positions.map(p => [assetKey(p.asset), p.quantity]).sort()
+  ]).sort());
+}
 
 export function nonnegative(value: string): Decimal {
   if (!/^\d+(\.\d+)?$/.test(value)) throw new Error('数量或价格格式无效');

@@ -1,6 +1,6 @@
 import {useState,useRef,useEffect} from 'react';
 import {nonnegative,type Price} from './domain';
-import {portfolioPresentation,assetTone,displayAmount as money,displayPercent as percent,displayTime as time,type Valuation,type Reference} from './portfolio-view';
+import {portfolioPresentation,assetTone,heroLabel,displayAmount as money,displayPercent as percent,displayTime as time,type Valuation,type Reference} from './portfolio-view';
 
 // Local decorative marks only; identity always comes from the full asset code.
 function AssetMark({code}:{code:string}){
@@ -10,19 +10,20 @@ function AssetMark({code}:{code:string}){
 const quote=(value:string|undefined)=>value===undefined?'—':nonnegative(value).toFixed();
 
 export function PortfolioOverview({value,reference=null,history:_history=new Map()}: {value:Valuation;reference?:Reference|null;history?:ReadonlyMap<string,Price>}){
-  const {view,current,displayed,historical,sameBalances,at,balanceAt,priceFrom,priceTo}=portfolioPresentation(value,reference);
+  const {view,current,displayed,historical,sameBalances,state,at,balanceAt,priceFrom,priceTo}=portfolioPresentation(value,reference);
   const {report}=value;
   const [tab,setTab]=useState<'overview'|'risk'>('overview'),[selected,setSelected]=useState<string|null>(null);
   const dialog=useRef<HTMLDialogElement>(null);
   const row=view.rows.find(r=>r.key===selected);
   useEffect(()=>{if(row&&!dialog.current?.open)dialog.current?.showModal();if(!row&&dialog.current?.open)dialog.current.close();},[row?.key]);
-  const unavailable=displayed.report.coveredSubtotal===null;
+  const unavailable=state==='unavailable';
   const missing=view.rows.length-view.priced;
   // 部分覆盖时，主数值是"已定价小计"，不是完整总值；缺价项数必须紧邻显示。
-  const partial=!historical&&!view.complete&&view.rows.length>0;
+  const partial=state==='live-partial';
   const coverage=`${view.priced} / ${view.rows.length} 项已估值${missing>0?` · 缺价 ${missing} 项`:''}`;
-  const title=historical?'上次估值 · 历史参考':view.complete?'Spot 资产总值':partial?'已定价小计':'Spot 已估值资产';
-  const previousDiffers=reference!==null&&money(reference.report.coveredSubtotal)!==money(displayed.report.coveredSubtotal);
+  const {title,tag}=heroLabel(state,view.rows.length>0);
+  // 只有金额或覆盖范围确实不同才提示旧记录；单纯时间不同不制造第二条数字。
+  const previousDiffers=reference!==null&&(money(reference.report.coveredSubtotal)!==money(displayed.report.coveredSubtotal)||reference.report.coverage!==displayed.report.coverage);
   const list=(rows:typeof view.rows)=><div className="table-scroll"><table className="portfolio-table"><thead><tr><th>资产</th><th>数量</th><th>价格 <small>USDT</small></th><th>市值 <small>USDT</small></th></tr></thead><tbody>{rows.map(r=><tr key={r.key}>
     <td><button className="asset-button" onClick={()=>setSelected(r.key)} aria-label={'查看 '+r.code+' 详情'}><AssetMark code={r.code}/><span><strong>{r.code}</strong>{r.value===undefined&&<small>{view.balanceCurrent?'待估值':'上次数量'}</small>}</span></button></td>
     <td className="number quantity">{r.quantity}</td><td className="number price">{quote(r.price?.value)}</td><td className="number value">{money(r.value)}{r.value===undefined&&<small>{view.balanceCurrent?'缺少有效价格':'余额已失效'}</small>}</td>
@@ -30,14 +31,14 @@ export function PortfolioOverview({value,reference=null,history:_history=new Map
   return <>
     <nav className="portfolio-tabs" aria-label="资产视图"><button aria-pressed={tab==='overview'} onClick={()=>setTab('overview')}>资产总览</button><button aria-pressed={tab==='risk'} onClick={()=>setTab('risk')}>风险分析</button></nav>
     {tab==='overview'?<>
-      <section className={'portfolio-hero'+(historical?' is-history':'')} aria-label="资产总览" data-valuation={historical?'historical':view.complete?'current':'partial'}>
-        <div className="portfolio-total"><p className={'eyebrow'+(partial?' is-partial':'')}>{title}<span className={'valuation-tag '+(historical?'tag-history':view.complete?'tag-current':'')}>{historical?'历史快照':view.complete?'当前有效':unavailable?'等待更新':'部分覆盖'}</span></p>
+      <section className={'portfolio-hero'+(historical?' is-history':'')} aria-label="资产总览" data-valuation={state}>
+        <div className="portfolio-total"><p className={'eyebrow'+(partial?' is-partial':'')}>{title}<span className={'valuation-tag '+(state.startsWith('history')?'tag-history':state==='live'||state==='zero'?'tag-current':'')}>{tag}</span></p>
           <h2 aria-label={unavailable?'不可用':undefined}>{money(displayed.report.coveredSubtotal)} <small>USDT</small></h2>
-          <p className="scope-label">{historical?`${time(at)} · ${view.complete?'当时完整估值':'当时仅部分覆盖'}`:view.rows.length?coverage:view.balanceCurrent?'本次成功快照余额为零。':'连接后显示你的 Spot 资产'}{historical&&<span> · 不代表当前资产</span>}</p>
+          <p className="scope-label">{state==='history-complete'?`${time(balanceAt)} · 当时完整估值 · 不代表当前资产`:state==='history-partial'?`${time(balanceAt)} · 当时仅部分覆盖 · 不代表当前资产`:state==='zero'?'本次成功快照余额为零。':state==='unavailable'?(view.rows.length?'余额或报价已失效，暂无当前估值。':'连接后显示你的 Spot 资产'):coverage}</p>
           {!historical&&!sameBalances&&reference&&!view.complete&&previousDiffers&&<p className="previous-valuation">此前估值 {money(reference.report.coveredSubtotal)} USDT · {time(reference.at)} · {reference.report.coverage==='complete'?'当时完整':'当时部分覆盖'}<small>属于另一份余额快照，仅供历史参考，未与当前数量合并。</small></p>}
         </div>
         <div className="portfolio-return"><span>持仓累计盈亏</span><strong>— <small>%</small></strong><p>— <small>USDT</small></p><span className="cost-note">成本尚未核实</span></div>
-        <div className="portfolio-meta"><span>余额采集 <strong>{time(balanceAt)}</strong></span><span>报价采集 <strong>{priceFrom?time(priceFrom)+(priceTo!==priceFrom?' — '+time(priceTo):''):'暂无市场报价'}</strong></span></div>
+        <div className="portfolio-meta"><span>余额采集 <strong>{time(balanceAt)}</strong></span><span>报价采集 <strong>{priceFrom?time(priceFrom)+(priceTo!==priceFrom?' — '+time(priceTo):''):'暂无市场报价'}</strong></span>{historical&&<span>历史记录 <strong>{time(at)}</strong></span>}</div>
       </section>
       {(historical||missing>0||(!current.balanceCurrent&&view.rows.length>0))&&<p className="coverage-callout" role="status">{historical?`${current.balanceCurrent?'报价待更新':'余额待更新'}。正在查看同一份历史估值记录，数量、金额与配置均保持当时口径。`:!current.balanceCurrent?'保留上次持仓，等待有效余额后恢复估值。':`${missing} 项资产待估值；以下小计与配置仅覆盖已定价部分，缺价不计为零。`}{historical&&missing>0&&` 当时还有 ${missing} 项缺价资产。`}</p>}
       <div className="portfolio-columns">

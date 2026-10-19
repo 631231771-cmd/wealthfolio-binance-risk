@@ -143,7 +143,7 @@ test('公开报价503不显示同步成功、不改动已验证余额数量且�
  assert.ok(!/SENSITIVE|signature|https:|TEST_SECRET/.test(JSON.stringify(diagnostic)));
 });
 test('行情诊断映射区分无候选、无市场、部分覆盖及预算截断',()=>{
- const base={assetCount:4,candidateCount:3,marketCount:2,pricedCount:1,failedRequestCount:0,unexaminedCount:1,requestCount:4,fallbackRequestCount:1};
+ const base={assetCount:4,candidateCount:3,marketCount:2,pricedCount:1,retainedCount:0,missingQuoteCount:0,noMarketCount:0,failedRequestCount:0,unexaminedCount:1,requestCount:4,fallbackRequestCount:1};
  for(const [status,code,pattern] of [
   ['no-candidates','QUOTE_NO_CANDIDATES',/没有需要查询/],
   ['no-market','QUOTE_NO_MARKET',/没有可用的USDT现货交易对/],
@@ -196,14 +196,21 @@ test('公开行情默认每分钟刷新，与余额TTL和认证退避独立；�
  h.reader.disconnect();const stopped=h.calls.length;h.advance(600_000);await h.reader.tick();assert.equal(h.calls.length,stopped);
 });
 
-test('公开行情失败保留历史报价和估值；失败后退避、成功恢复，不把旧价当本次成功',async()=>{
+// 语义变更（0.2.2）：一次报价失败不再销毁仍在 TTL 内的报价；过期后才回退到 USDT 小计。
+test('公开行情失败保留TTL内报价，过期后回退，恢复后重新估值',async()=>{
  const h=await harness();h.reader.authorize('1',ack);await h.reader.sync();await h.reader.tick();
+ assert.equal(h.reader.valued().report.coveredSubtotal,'65.00000000');
  h.setQuoteFailure(true);h.advance(60_000);await h.reader.tick();
- assert.equal(h.reader.valued().report.coveredSubtotal,'15.00000000');
+ assert.equal(h.reader.getDiagnostic().code,'QUOTE_REQUEST_FAILED');
+ assert.equal(h.reader.valued().report.coveredSubtotal,'65.00000000'); // 报价 60 秒，仍在 120 秒有效期内
  assert.equal(h.reader.getHistoricalQuotes().get('BTC')?.value,'50000');
  assert.equal(h.reader.getReference()?.report.coveredSubtotal,'65.00000000');
- const count=h.calls.length;h.advance(60_000);await h.reader.tick();assert.equal(h.calls.length,count);
- h.setQuoteFailure(false);h.advance(60_000);await h.reader.tick();assert.equal(h.reader.valued().report.coveredSubtotal,'65.00000000');
+ h.advance(60_000);await h.reader.tick(); // 第二次失败；报价到达 120 秒边界仍有效
+ assert.equal(h.reader.valued().report.coveredSubtotal,'65.00000000');
+ h.advance(1_000); // 越过 TTL，旧报价不得继续进入当前估值
+ assert.equal(h.reader.valued().report.coveredSubtotal,'15.00000000');
+ h.setQuoteFailure(false);h.advance(60_000);await h.reader.tick();
+ assert.equal(h.reader.valued().report.coveredSubtotal,'65.00000000');
 });
 
 test('最新部分估值替代较早完整记录，深拷贝历史且不同余额不复用旧总值',async()=>{

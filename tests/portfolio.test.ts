@@ -37,7 +37,7 @@ test('USDC占多数的虚构账户：市场报价、精确数量、估值、微�
  const reference={...value,at},failed=structuredClone(state);failed.statuses[account.id].state='failed' as any;
  const stale={state:failed,report:spotRisk(failed,now+400_000)};
  const historical=renderToStaticMarkup(createElement(PortfolioOverview,{value:stale,reference,history:reader.getHistoricalQuotes()}));
- assert.ok(historical.includes('上次估值 · 历史参考'));assert.ok(historical.includes('12,734.43'));assert.ok(historical.includes('当时仅部分覆盖'));assert.equal(stale.report.coveredSubtotal,null);
+ assert.ok(historical.includes('上次部分估值'));assert.ok(historical.includes('历史 · 部分覆盖'));assert.ok(historical.includes('12,734.43'));assert.ok(historical.includes('当时仅部分覆盖'));assert.equal(stale.report.coveredSubtotal,null);
  assert.equal(portfolioView(stale).dust.length,0); // Raw current risk remains unavailable; only the coherent presentation may use history.
 });
 

@@ -238,7 +238,9 @@ test('多批报价一批成功一批503时保留新报价并标记部分成功',
  assert.equal(reader.getSpotQuotes().has(assets[20]),false);assert.equal(result.requestCount,4);
 });
 
-test('HTTP200报价结果缺行时按未完成请求处理并保留准确覆盖状态',async()=>{
+// 语义变更（0.2.2）：HTTP 200 但缺少 ticker 行 = 本次暂时缺价，不是请求失败。
+// 它不能驱动退避（否则一个停牌交易对会让整页永久半失败），但仍要让覆盖状态不完整。
+test('HTTP200报价结果缺行按暂时缺价计数，不冒充请求失败也不驱动退避',async()=>{
  for(const returnedSymbols of [[],['BTCUSDT']]){
   const reader=new SpotQuoteReader({request:async request=>{
    const symbols=requestedSymbols(request),path=new URL(request.url).pathname;
@@ -246,7 +248,8 @@ test('HTTP200报价结果缺行时按未完成请求处理并保留准确覆盖�
    return response(returnedSymbols.map(symbol=>({symbol,price:'2.5'})));
   }},()=>NOW);
   const result=await reader.refreshSpotAssets(['BTC','ETH']);
-  assert.equal(result.failedRequestCount,1);
+  assert.equal(result.failedRequestCount,0);
+  assert.equal(result.missingQuoteCount,2-returnedSymbols.length);
   assert.equal(result.status,returnedSymbols.length?'partial':'request-failed');
   assert.equal(result.pricedCount,returnedSymbols.length);
   assert.equal(reader.getSpotQuotes().has('BTC'),returnedSymbols.length===1);
@@ -370,7 +373,9 @@ test('非200错误正文也按UTF-8字节预算解析，超限时不读取其中
  assert.ok(!JSON.stringify(result).includes('-1121'));assert.ok(!JSON.stringify(result).includes('界'));
 });
 
-test('后续行情故障不会把前次报价冒充为本次成功报价',async()=>{
+// 语义变更（0.2.2）：一次失败不再销毁仍在 120 秒 TTL 内的已验证报价。
+// 失败本身必须被记录（status/pricedCount），旧价保留原 asOf，过期后由估值层丢弃。
+test('后续行情故障不冒充本次成功，但保留仍在有效期内的旧报价',async()=>{
  let fail=false;
  const reader=new SpotQuoteReader({request:async request=>{
   const url=new URL(request.url),symbols=requestedSymbols(request);
@@ -379,8 +384,12 @@ test('后续行情故障不会把前次报价冒充为本次成功报价',async(
  }},()=>NOW);
  const first=await reader.refreshSpotAssets(['BTC','ETH']);
  assert.equal(first.status,'complete');assert.equal(reader.getSpotQuotes().size,2);
+ const firstAt=new Date(NOW).toISOString();
  fail=true;const second=await reader.refreshSpotAssets(['BTC','ETH']);
- assert.equal(second.status,'request-failed');assert.equal(second.pricedCount,0);assert.equal(reader.getSpotQuotes().size,0);
+ assert.equal(second.status,'request-failed');assert.equal(second.pricedCount,0);assert.equal(second.failedRequestCount,1);
+ assert.equal(second.retainedCount,2);
+ assert.equal(reader.getSpotQuotes().size,2);
+ assert.equal(reader.getSpotQuotes().get('BTC')?.asOf,firstAt); // 旧报价不得刷新自己的采集时间
 });
 
 test('候选截断与请求失败并存时优先报告请求失败并保留预算摘要',async()=>{

@@ -23,7 +23,15 @@ export interface SpotQuoteRefreshResult {
   assetCount:number;
   candidateCount:number;
   marketCount:number;
+  // 本轮真正取得的新报价
   pricedCount:number;
+  // 没有新报价、但仍在使用 TTL 内既有报价的资产
+  retainedCount:number;
+  // 已验证市场本次没有返回 ticker（暂时缺价，不等于无市场）
+  missingQuoteCount:number;
+  // exchangeInfo 明确无 USDT 市场，或资产代码无法构成交易对
+  noMarketCount:number;
+  // 只有网络/HTTP/解析级失败进入这里，驱动退避
   failedRequestCount:number;
   unexaminedCount:number;
   requestCount:number;
@@ -119,6 +127,8 @@ export class SpotQuoteReader {
   getHistoricalQuotes(){return structuredClone(this.history);}
   getCooldownUntil(){return this.cooldownUntil;}
   isBusy(){return this.busy||this.pending;}
+  // 页面隐藏只阻断迟到结果，不销毁仍然有效的报价；显式断开才清空。
+  pause(){this.epoch++;}
   disconnect(){this.epoch++;this.prices.clear();}
   private async request(request:NetworkRequest,epoch:number):Promise<unknown>{
     if(epoch!==this.epoch)throw new PublicMarketError('disconnected');
@@ -133,7 +143,7 @@ export class SpotQuoteReader {
     finally{clearTimeout(timer);}
     if(epoch!==this.epoch)throw new PublicMarketError('disconnected');
     if(response.status===429||response.status===418)throw new PublicMarketError('rate-limit');
-    if(response.status!==200){let exchangeCode:number|undefined;if(typeof response.body==='string'&&withinUtf8Limit(response.body,PUBLIC_ERROR_MAX_BYTES))try{const parsed=JSON.parse(response.body) as {code?:unknown};if(Number.isSafeInteger(parsed?.code))exchangeCode=parsed.code as number;}catch{/* 不透传错误正文 */}throw new PublicMarketError(response.status===400&&exchangeCode===-1121?'invalid':'network',exchangeCode);}
+    if(response.status!==200){let exchangeCode:number|undefined;if(typeof response.body==='string'&&withinUtf8Limit(response.body,PUBLIC_ERROR_MAX_BYTES))try{const parsed=JSON.parse(response.body) as {code?:unknown};if(Number.isSafeInteger(parsed?.code))exchangeCode=parsed.code as number;}catch{/* 不透传错误正文 */}throw new PublicMarketError(response.status===400&&(exchangeCode===-1121||exchangeCode===-1220)?'invalid':'network',exchangeCode);}
     if(typeof response.body!=='string'||!withinUtf8Limit(response.body,PUBLIC_RESPONSE_MAX_BYTES))throw new PublicMarketError('invalid');
     try{return JSON.parse(response.body);}catch{throw new PublicMarketError('invalid');}
   }
@@ -155,21 +165,36 @@ export class SpotQuoteReader {
       const allCandidates=unique.flatMap(code=>{const symbol=candidateUsdtSymbol(code);return symbol?[[code,symbol] as const]:[]});
       const candidates=allCandidates.slice(0,SPOT_QUOTE_MAX_CANDIDATES);
       const budget:SpotQuoteRequestBudget={requestCount:0,fallbackRequestCount:0};
-      let failedRequestCount=0,unexaminedCount=allCandidates.length-candidates.length;
+      let failedRequestCount=0,missingQuoteCount=0,unexaminedCount=allCandidates.length-candidates.length;
       if(unexaminedCount)budget.budgetReason='candidate-cap';
-      const unpriceableCount=unique.filter(code=>code!=='USDT'&&!candidateUsdtSymbol(code)).length;
       const markets=new Map<string,string>();
-      const result=(status:SpotQuoteRefreshStatus):SpotQuoteRefreshResult=>{
+      let stopForBudget=false;
+      // exchangeInfo 明确无市场 ≠ 本次没拿到 ticker；两者分别计数，只有前者可缓存。
+      const knownNoMarket=(code:string)=>this.markets.get(code)?.symbol===null;
+      const validOld=(code:string)=>{
+        const price=this.prices.get(code);if(!price)return false;
+        const at=Date.parse(price.asOf),now=this.now();
+        return Number.isFinite(at)&&at<=now&&now-at<=PUBLIC_TTL_MS;
+      };
+      const publish=(status:SpotQuoteRefreshStatus):SpotQuoteRefreshResult=>{
         if(epoch!==this.epoch)throw new PublicMarketError('disconnected');
-        this.prices=prices;
+        // 合并而不是替换：未检查、暂时缺 ticker 或本轮失败时，旧报价保留到自身 TTL 到期。
+        // 旧价不会被改写 asOf，也不会在过期后继续进入估值（由 mergeDynamicPublicSpotPrices 过滤）。
+        const merged=new Map<string,Price>();
+        for(const code of unique){const old=this.prices.get(code);if(old)merged.set(code,old);}
+        for(const [code,price] of prices)merged.set(code,price);
+        this.prices=merged;
         for(const code of this.history.keys())if(!unique.includes(code))this.history.delete(code);
         for(const [code,price] of prices)this.history.set(code,price);
+        const retained=unique.filter(code=>code!=='USDT'&&!prices.has(code)&&(()=>{const p=merged.get(code);if(!p)return false;const at=Date.parse(p.asOf),now=this.now();return Number.isFinite(at)&&at<=now&&now-at<=PUBLIC_TTL_MS;})()).length;
+        const noMarketCount=unique.filter(code=>code!=='USDT'&&!merged.has(code)&&(knownNoMarket(code)||!candidateUsdtSymbol(code))).length;
         return {
-        status,assetCount:unique.length,candidateCount:allCandidates.length,marketCount:markets.size,pricedCount:prices.size,
+        status,assetCount:unique.length,candidateCount:allCandidates.length,marketCount:markets.size,
+        pricedCount:prices.size,retainedCount:retained,missingQuoteCount,noMarketCount,
         failedRequestCount,unexaminedCount,requestCount:budget.requestCount,fallbackRequestCount:budget.fallbackRequestCount,
         ...(budget.budgetReason?{budgetReason:budget.budgetReason}:{})
       };};
-      if(!candidates.length)return result('no-candidates');
+      if(!candidates.length)return publish('no-candidates');
       // 正映射15分钟、明确无市场3分钟；不缓存网络错误。定时刷新通常只请求ticker。
       const unresolved=candidates.filter(([code])=>{
         const cached=this.markets.get(code),age=cached?this.now()-cached.at:Infinity;
@@ -181,7 +206,6 @@ export class SpotQuoteReader {
         const found=parseUsdtMarkets(payload,assets);
         for(const code of assets){const symbol=found.get(code)??null;this.markets.set(code,{symbol,at:this.now()});if(symbol)markets.set(code,symbol);}
       };
-      let stopForBudget=false;
       metadata: for(let offset=0;offset<unresolved.length;offset+=SPOT_QUOTE_BATCH_SIZE){
         const batch=unresolved.slice(offset,offset+SPOT_QUOTE_BATCH_SIZE);
         const symbols=batch.map(([,symbol])=>symbol),assets=batch.map(([code])=>code);
@@ -218,14 +242,16 @@ export class SpotQuoteReader {
             const payload=await this.requestWithinBudget(publicMarketRequest('price',symbols),epoch,budget);
             if(payload===undefined){unexaminedCount+=entries.length-offset;stopForBudget=true;break quotes;}
             const tickers=parseTickerPricesPartial(payload,symbols,new Date(this.now()).toISOString());
-            // HTTP 200 不代表结果完整；缺失 ticker 行要进入部分覆盖诊断。
-            if(tickers.size<chunk.length)failedRequestCount++;
+            // HTTP 200 不代表结果完整：缺失行属于"本次暂时没有报价"，不是请求失败。
+            if(tickers.size<chunk.length)missingQuoteCount+=chunk.length-tickers.size;
             for(const [code,symbol] of chunk){
               const price=tickers.get(symbol);
               if(price)prices.set(code,{...price,source:'external:'+PUBLIC_ORIGIN+'/api/v3/ticker/price（采集时间，非成交时间）'});
             }
           }catch(error){
             if(isTerminalQuoteError(error))throw error;
+            // 单 symbol + symbolStatus=TRADING 时，停牌市场返回 -1220；这是暂时无报价，不是网络失败。
+            if(error instanceof PublicMarketError&&error.exchangeCode===-1220){missingQuoteCount+=chunk.length;continue;}
             if(!(error instanceof PublicMarketError&&error.exchangeCode===-1121)){failedRequestCount++;continue;}
             for(let index=0;index<chunk.length;index++){
               const [code,symbol]=chunk[index];
@@ -237,10 +263,11 @@ export class SpotQuoteReader {
                 }
                 const price=parseTickerPrices(payload,[symbol],new Date(this.now()).toISOString(),'external').get(symbol);
                 if(price)prices.set(code,{...price,source:'external:'+PUBLIC_ORIGIN+'/api/v3/ticker/price（采集时间，非成交时间）'});
-                else failedRequestCount++;
+                else missingQuoteCount++;
               }catch(singleError){
                 if(isTerminalQuoteError(singleError))throw singleError;
-                if(singleError instanceof PublicMarketError&&singleError.exchangeCode===-1121)this.markets.delete(code);
+                if(singleError instanceof PublicMarketError&&singleError.exchangeCode===-1121){this.markets.delete(code);continue;}
+                if(singleError instanceof PublicMarketError&&singleError.exchangeCode===-1220){missingQuoteCount++;continue;}
                 failedRequestCount++;
               }
             }
@@ -248,13 +275,18 @@ export class SpotQuoteReader {
         }
       }
       if(epoch!==this.epoch)throw new PublicMarketError('disconnected');
-      if(prices.size===0&&failedRequestCount>0)return result('request-failed');
-      if(stopForBudget||budget.budgetReason)return result('budget-limited');
-      if(!allCandidates.length)return result('no-candidates');
-      if(markets.size===0)return result(failedRequestCount?'request-failed':'no-market');
-      const fullyPriced=allCandidates.length===candidates.length&&unpriceableCount===0&&markets.size===candidates.length&&prices.size===markets.size&&failedRequestCount===0;
-      return result(fullyPriced?'complete':'partial');
-    }catch(error){this.prices.clear();throw error instanceof PublicMarketError?error:new PublicMarketError('invalid');}
+      // 结构性无市场（exchangeInfo 判定或无法构成交易对）与"本次缺价"分开统计；
+      // 二者都让覆盖不完整，但只有请求级失败驱动退避。
+      const noMarketCodes=unique.filter(code=>code!=='USDT'&&!prices.has(code)&&!validOld(code)&&(knownNoMarket(code)||!candidateUsdtSymbol(code)));
+      const uncovered=unique.filter(code=>code!=='USDT'&&!prices.has(code)&&!validOld(code)&&!noMarketCodes.includes(code)).length;
+      const hasAnyValidPrice=unique.some(code=>code!=='USDT'&&validOld(code));
+      if(prices.size===0&&failedRequestCount>0)return publish('request-failed');
+      if(prices.size===0&&!hasAnyValidPrice&&missingQuoteCount>0)return publish('request-failed');
+      if(stopForBudget||budget.budgetReason)return publish('budget-limited');
+      if(markets.size===0)return publish(failedRequestCount?'request-failed':'no-market');
+      const complete=uncovered===0&&noMarketCodes.length===0&&failedRequestCount===0&&unexaminedCount===0&&missingQuoteCount===0;
+      return publish(complete?'complete':'partial');
+    }catch(error){throw error instanceof PublicMarketError?error:new PublicMarketError('invalid');}
     finally{this.busy=false;}
   }
 }

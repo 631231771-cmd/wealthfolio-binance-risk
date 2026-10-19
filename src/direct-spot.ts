@@ -3,10 +3,12 @@ import { BinanceCredentials } from './credentials';
 import { buildOfflineReadRequest, signPayload } from './binance';
 import { calibrateTime, classifyResponse, spotSnapshot, SpotError, spotShock, ClockError, SpotValidationError, type ClockDetails, type SpotValidationDetails } from './spot';
 import { PublicMarketError, SpotQuoteReader, mergeDynamicPublicSpotPrices, PUBLIC_ORIGIN, type SpotQuoteRefreshResult } from './public-market';
-import { assetKey, calculateRisk, type PortfolioState } from './domain';
+import { assetKey, balanceIdentity, calculateRisk, type PortfolioState } from './domain';
 
 export const DIRECT_INTERVAL=300_000, DIRECT_TTL=360_000;
 export const QUOTE_INTERVAL=60_000, QUOTE_TTL=120_000;
+// 首次失败先等 30 秒再试：此时旧报价通常仍在 120 秒有效期内，能尽快恢复而不放大请求量。
+export const QUOTE_RETRY_BASE=30_000;
 const blocked=['enableWithdrawals','enableInternalTransfer','enableMargin','enableFutures','permitsUniversalTransfer','enableVanillaOptions','enableFixApiTrade','enableSpotAndMarginTrading','enablePortfolioMarginTrading'];
 export const READ_ONLY_FIELDS=['enableReading','ipRestrict',...blocked,'enableFixReadOnly'];
 export type PermissionReason='READING_DISABLED'|'EXTRA_PERMISSION'|'PERMISSION_FIELDS_INCOMPLETE';
@@ -71,7 +73,7 @@ export class DirectSpot {
     return {canRetry:true,reason:'ready',waitSeconds:0};
   }
   getStatus(){return {connected:this.connected,busy:this.busy||this.pending||this.quotes.isBusy(),auto:this.auto,success:this.success,nextDue:Math.max(this.due,this.cooldownUntil,this.quotes.getCooldownUntil()),quoteDue:Math.max(this.quoteDue,this.cooldownUntil,this.quotes.getCooldownUntil()),quoteRetry:this.retry(true),visible:this.visible,retry:this.retry()};}
-  setVisible(value:boolean){if(this.visible&&!value){this.epoch++;this.quotes.disconnect();}if(!this.visible&&value&&!this.quoteFailures)this.quoteDue=0;this.visible=value;}
+  setVisible(value:boolean){if(this.visible&&!value){this.epoch++;this.quotes.pause();}if(!this.visible&&value&&!this.quoteFailures)this.quoteDue=0;this.visible=value;}
   disconnect(){this.epoch++;this.quotes.disconnect();this.connected=false;this.auto=false;this.success=false;this.failures=0;this.due=0;this.invalidate();this.diagnostic={stage:'disconnected',code:'USER_DISCONNECTED'};this.message='已断开；不再发送新请求，在途SDK请求无法撤回，迟到结果不发布';}
   private invalidate(){for(const a of this.state.accounts)this.state.statuses[a.id]={state:'failed',attemptedAt:new Date(this.now()).toISOString(),reason:'真实Spot读取失效；历史数量仅供参考'};}
   authorize(uid:string,ack:{risk:boolean;smallAccount:boolean;readOnlyPage:boolean;aiIsolated:boolean}){
@@ -92,7 +94,10 @@ export class DirectSpot {
     const value=this.valued();
     // Keep the latest publishable valuation as one immutable record, including
     // its coverage and quantities. An older complete record must not mask a newer partial one.
-    if(value.report.coveredSubtotal!==null&&(afterQuotes||value.report.coverage==='complete'||this.reference===null))this.reference=structuredClone({...value,at:new Date(this.now()).toISOString()});
+    if(value.report.coveredSubtotal===null)return;
+    // 同一份余额上，完整记录不被后续部分估值降级；余额变了才整体替换。
+    if(this.reference&&balanceIdentity(this.reference.state)===balanceIdentity(value.state)&&this.reference.report.coverage==='complete'&&value.report.coverage!=='complete')return;
+    if(afterQuotes||value.report.coverage==='complete'||this.reference===null)this.reference=structuredClone({...value,at:new Date(this.now()).toISOString()});
   }
   private async request(req:NetworkRequest,epoch:number,publicOnly=false):Promise<unknown>{
     if(publicOnly&&!(req.method==='GET'&&[PUBLIC_ORIGIN+'/api/v3/time','https://api.binance.com/api/v3/time'].includes(req.url)&&!req.headers&&!req.body))throw new SpotError('invalid');
@@ -244,7 +249,11 @@ export class DirectSpot {
         network:'QUOTE_REQUEST_FAILED',timeout:'QUOTE_TIMEOUT','rate-limit':'QUOTE_RATE_LIMIT',invalid:'QUOTE_INVALID',disconnected:'QUOTE_DISCONNECTED',busy:'QUOTE_BUSY'
       } as const)[error.code]:'QUOTES_UNAVAILABLE';
       if(this.connected&&this.visible&&epoch===this.epoch){this.diagnostic={stage:'quotes',code};this.quoteFailures++;}
-    }finally{this.busy=false;this.quoteDue=this.now()+Math.min(QUOTE_INTERVAL*2**Math.min(this.quoteFailures,3),300_000);}
+    }finally{
+      this.busy=false;
+      const wait=this.quoteFailures?Math.min(QUOTE_RETRY_BASE*2**Math.min(this.quoteFailures-1,3),300_000):QUOTE_INTERVAL;
+      this.quoteDue=this.now()+wait;
+    }
   }
   valued(){
     const now=this.now(),state=this.getState(),a=state.accounts[0];

@@ -75,20 +75,25 @@ test('同一快照过期后，历史配置、占比与微额折叠来自同一�
 });
 
 // ── 2a. 新快照数量相同、时间变化 ───────────────────────────────────
-test('新快照数量相同但时间变化：不复用旧记录，也不把旧总值当当前值',()=>{
+// 产品裁定（0.2.2）：账户与持仓构成一致、仅采集时间变化时，允许复用上一次可靠估值，
+// 但必须以历史口径展示，并保留原余额/报价时间，不得冒充当前总值。
+test('新快照数量相同但时间变化：复用历史参考，仍标历史且不冒充当前值',()=>{
  const value=fixture(),reference=frozen(value);
  const same=rebalance(value,60_000,()=>{},false);
  const p=portfolioPresentation(same,reference);
- assert.equal(p.historical,false);
- assert.equal(p.sameBalances,false);
- // 数量必须来自新快照，不能被旧记录替换
+ assert.equal(p.sameBalances,true);
+ assert.equal(p.historical,true);
+ assert.equal(p.state,'history-partial'); // NOPAIR 无价，参考记录本身是部分覆盖
  assert.deepEqual([...p.view.rows.map(r=>r.quantity)].sort(),['0.0000001','0.05','12000','250','3'].sort());
- assert.equal(same.report.coveredSubtotal,'250.00000000'); // 仅 USDT 可计价
+ assert.equal(p.displayed.report.coveredSubtotal,'15484.46000000');
+ assert.equal(p.balanceAt,AT); // 展示的是参考记录自己的余额时间
  const html=render(same,reference);
- assert.equal(hero(html).includes('250.00'),true);
- assert.equal(hero(html).includes('15,484.46'),false); // 旧总值不得出现在主数值
- assert.match(html,/此前估值 15,484.46 USDT/);          // 只作为明确标注的历史参考
- assert.match(html,/属于另一份余额快照/);
+ assert.equal(hero(html).includes('15,484.46'),true);
+ assert.match(html,/上次部分估值/);
+ assert.match(html,/不代表当前资产/);
+ assert.match(html,/历史 · 部分覆盖/);
+ assert.doesNotMatch(html,/此前估值/);
+ assert.equal(same.report.coveredSubtotal,'250.00000000'); // 当前风险口径仍只有 USDT
 });
 test('新快照数量相同且报价有效时，总值与排序完全按当前快照计算',()=>{
  const value=fixture(),reference=frozen(value);
@@ -186,7 +191,7 @@ test('成功零余额与无有效数据在数值、标签与空态上明确区�
 });
 
 // ── 6. 报价失败 / 退避 / 限流文案 ────────────────────────────────
-const quoteResult=(status:SpotQuoteRefreshResult['status'],o:Partial<SpotQuoteRefreshResult>={}):SpotQuoteRefreshResult=>({status,assetCount:3,candidateCount:3,marketCount:3,pricedCount:0,failedRequestCount:0,unexaminedCount:0,requestCount:2,fallbackRequestCount:0,...o});
+const quoteResult=(status:SpotQuoteRefreshResult['status'],o:Partial<SpotQuoteRefreshResult>={}):SpotQuoteRefreshResult=>({status,assetCount:3,candidateCount:3,marketCount:3,pricedCount:0,retainedCount:0,missingQuoteCount:0,noMarketCount:0,failedRequestCount:0,unexaminedCount:0,requestCount:2,fallbackRequestCount:0,...o});
 const retry=(reason:DirectRetry['reason'],waitSeconds=0):DirectRetry=>({canRetry:reason==='ready',reason,waitSeconds});
 function panel(diagnostic:DirectDiagnostic,quoteRetry:DirectRetry,success=true){
  const state=fixture().state;

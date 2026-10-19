@@ -17,7 +17,7 @@ function render(state:PortfolioState,connected:boolean,success=connected,busy=fa
  return renderToStaticMarkup(createElement(DirectSpotPanel,{reader,credentials:{} as BinanceCredentials}));
 }
 function sample(){const {account,snapshot}=spotSnapshot({uid:1,accountType:'SPOT',balances:[{asset:'BTC',free:'0.001',locked:'0'},{asset:'USDT',free:'15',locked:'0'},{asset:'NOPAIR',free:'2',locked:'0'}]},'external',at,at);for(const p of snapshot.positions)if(p.asset.code!=='NOPAIR')p.price={value:p.asset.code==='BTC'?'50000':'1',currency:'USDT',asOf:at,source:'external:test'};return {schemaVersion:1 as const,accounts:[account],snapshots:{[account.id]:snapshot},statuses:{[account.id]:{state:'ready' as const,attemptedAt:at}}};}
-function quoteResult(status:SpotQuoteRefreshResult['status'],overrides:Partial<SpotQuoteRefreshResult>={}):SpotQuoteRefreshResult{return {status,assetCount:2,candidateCount:2,marketCount:2,pricedCount:status==='complete'?2:0,failedRequestCount:0,unexaminedCount:0,requestCount:2,fallbackRequestCount:0,...overrides};}
+function quoteResult(status:SpotQuoteRefreshResult['status'],overrides:Partial<SpotQuoteRefreshResult>={}):SpotQuoteRefreshResult{return {status,assetCount:2,candidateCount:2,marketCount:2,pricedCount:status==='complete'?2:0,retainedCount:0,missingQuoteCount:0,noMarketCount:0,failedRequestCount:0,unexaminedCount:0,requestCount:2,fallbackRequestCount:0,...overrides};}
 test('主面板空态、连接设置默认关闭，保留明确本人确认项',()=>{
  const html=render({schemaVersion:1,accounts:[],snapshots:{},statuses:{}},false);
  assert.ok(html.includes('资产总览'));assert.ok(html.includes('Spot 已估值资产'));assert.ok(html.includes('连接后显示真实Spot持仓'));
