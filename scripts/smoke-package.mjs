@@ -54,7 +54,7 @@ const bundle=readFileSync(new URL('../dist/addon.js',import.meta.url),'utf8');
 assert.ok(!/\bimport\s*\(/.test(bundle),'入口不得包含动态 import 或同名方法，避免宿主加载歧义');
 assert.ok(!/\blocalStorage\b|\bsessionStorage\b|\bfetch\s*\(/.test(bundle));
 assert.deepEqual(manifest.permissions.find(p=>p.category==='secrets').functions,['set','get','delete']);
-assert.deepEqual(manifest.permissions.map(p=>p.category),['secrets','files','network','accounts','snapshots','quotes','currency','settings']);
+assert.deepEqual(manifest.permissions.map(p=>p.category),['secrets','files','network','accounts','snapshots','quotes','assets','currency','settings']);
 // 原生写入不得包含删除或组合重算能力。
 assert.ok(!manifest.permissions.find(p=>p.category==='snapshots').functions.includes('delete'));
 assert.ok(!manifest.permissions.some(p=>['portfolio','activities','market-data'].includes(p.category)));

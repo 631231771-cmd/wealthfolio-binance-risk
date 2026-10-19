@@ -52,7 +52,7 @@ export function PortfolioOverview({value,reference=null,costs,nativePanel}: {val
           <div><span>估值覆盖</span><strong>{view.rows.length?`${view.priced} / ${view.rows.length} 项`:'—'}</strong></div>
           <div><span>最大单资产</span><strong>{largest?`${largest.code} ${percent(largest.weight)}`:'—'}</strong></div>
           <div><span>{headline.label}</span><strong className={'cost-value'+gainTone}>{gainValue===null?'—':gainValue===0?'0.00':`${gainValue<0?'-':'+'}${money(Math.abs(gainValue).toFixed(2))}`}</strong></div>
-          <p className="cost-status">{cost.state==='none'?'成本尚未核实 · 暂不显示盈亏':`${headline.pct===null?'—':(Number(headline.pct)*100).toFixed(2)+'%'} · ${cost.state==='partial'?'仅已核实成本部分':'已核实成本'}`}</p>
+          <p className="cost-status">{cost.state==='none'?'成本尚未核实 · 暂不显示盈亏':`${headline.pct===null?'—':(Number(headline.pct)*100).toFixed(2)+'%'} · ${headline.basis}`}</p>
         </div>
         <div className="portfolio-meta"><span>余额采集 <strong>{time(balanceAt)}</strong></span><span>报价采集 <strong>{priceFrom?time(priceFrom)+(priceTo!==priceFrom?' — '+time(priceTo):''):'暂无市场报价'}</strong></span>{historical&&<span>历史记录 <strong>{time(at)}</strong></span>}</div>
       </section>

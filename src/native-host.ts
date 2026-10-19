@@ -26,6 +26,9 @@ export interface NativeHostBridge {
   listSnapshots(accountId:string,from:string,to:string):Promise<NativeSnapshotRow[]>;
   getByDate(accountId:string,date:string):Promise<NativeActualRow[]>;
   updateQuote(assetId:string,quote:NativeQuote):Promise<void>;
+  updateQuoteMode(assetId:string,mode:'MARKET'|'MANUAL'):Promise<void>;
+  readCosts():Promise<Record<string,{unitCost:string;source?:string;updatedAt?:string}>>;
+  writeCosts(book:Record<string,{unitCost:string;source?:string;updatedAt?:string}>):Promise<void>;
   baseCurrency():Promise<string>;
   rateForDate(from:string,to:string,date:string):Promise<{rate:number|null;error?:string|null}>;
   listRates():Promise<RateRecord[]>;
@@ -49,10 +52,13 @@ export interface NativePreview {
   rateDiagnostic:RateResolution;
   allowUnknownCost:boolean; costUnknownSymbols:string[];
 }
+export type NativeStage='readback-failed'|'quotes-partial'|'reconciled';
 export interface NativeResult {
   accountId:string; created:boolean; snapshotDate:string;
   positionCount:number; cashCurrencyCount:number;
   readback:'ok'|'failed';
+  stage:NativeStage;
+  quoteModeUpdated:number;
   reconcile:ReturnType<typeof reconcilePlan>|null;
   quotesPushed:number; quoteFailures:number; warnings:string[];
 }
@@ -145,34 +151,71 @@ export class NativeSync {
     if(reconcile&&!reconcile.ok)warnings.push('读回数量与预期不一致');
     const snap=rows.find(r=>r.snapshotDate===current.date);
     if(readback==='ok'&&!snap)warnings.push('读回未找到当日快照');
-    // 报价是尽力而为：只写非 MANUAL 资产；失败不回滚已写入的持仓，但必须明确后果。
-    let quotesPushed=0,quoteFailures=0;
+    // 报价：把资产切到 MANUAL 以停止宿主默认提供者（Yahoo）的自动同步，
+    // 再用与成本备用报价相同的 id 写入市场价；成功时覆盖成本价，失败时明确部分完成。
+    let quotesPushed=0,quoteFailures=0,quoteModeUpdated=0;
     if(readback==='ok'){
       const prices=new Map<string,{value:string;asOf:string}>();
       for(const s of Object.values(value.state.snapshots))for(const p of s.positions)if(p.price)prices.set(p.asset.code,{value:p.price.value,asOf:p.price.asOf});
+      const datePart=current.date.replaceAll('-','');
       for(const row of actual){
+        if(!row.assetId)continue;
+        if(row.quoteMode!=='MANUAL'){
+          try{await this.host.updateQuoteMode(row.assetId,'MANUAL');quoteModeUpdated++;}
+          catch{quoteFailures++;}
+        }
         const price=prices.get(row.symbol);
-        if(!row.assetId||!price||row.quoteMode==='MANUAL')continue;
+        if(!price)continue;
         let close:number;
         try{close=Number(nonnegative(price.value).toFixed(8));}catch{continue;}
         if(!Number.isFinite(close)||close<=0)continue;
         const timestamp=new Date(price.asOf).toISOString();
         try{
-          await this.host.updateQuote(row.assetId,{id:`${row.assetId}_${current.date}_BINANCE`,createdAt:new Date().toISOString(),dataSource:'BINANCE',
+          await this.host.updateQuote(row.assetId,{id:`${datePart}_${row.assetId.toUpperCase()}`,createdAt:new Date().toISOString(),dataSource:'BINANCE',
             timestamp,assetId:row.assetId,open:close,high:close,low:close,volume:0,close,adjclose:close,currency:NATIVE_CURRENCY});
           quotesPushed++;
         }catch{quoteFailures++;}
       }
-      if(quoteFailures)warnings.push(`${quoteFailures} 项报价写入失败；原生页面会把这些资产按 0 估值`);
+      if(quoteFailures)warnings.push(`${quoteFailures} 项报价或报价模式写入失败；原生页面可能暂时使用成本价或按 0 估值，请使用“仅修复报价”`);
     }
+    const stage:NativeStage=readback==='failed'?'readback-failed':quoteFailures?'quotes-partial':'reconciled';
     return {accountId:account.id,created,snapshotDate:current.date,positionCount:snap?.positionCount??actual.length,
-      cashCurrencyCount:snap?.cashCurrencyCount??Object.keys(current.cashBalances).length,readback,reconcile,quotesPushed,quoteFailures,warnings};
+      cashCurrencyCount:snap?.cashCurrencyCount??Object.keys(current.cashBalances).length,readback,stage,quoteModeUpdated,reconcile,quotesPushed,quoteFailures,warnings};
+  }
+  // 只修报价与报价模式，不重写快照；用于快照已提交但报价失败的部分完成状态。
+  async repairQuotes(value:Valuation,accountId:string,date:string):Promise<{pushed:number;failed:number;modeUpdated:number}>{
+    let actual:NativeActualRow[];
+    try{actual=await this.host.getByDate(accountId,date);}
+    catch{throw new NativeSyncError('HOST_UNAVAILABLE');}
+    const prices=new Map<string,{value:string;asOf:string}>();
+    for(const s of Object.values(value.state.snapshots))for(const p of s.positions)if(p.price)prices.set(p.asset.code,{value:p.price.value,asOf:p.price.asOf});
+    const datePart=date.replaceAll('-','');
+    let pushed=0,failed=0,modeUpdated=0;
+    for(const row of actual){
+      if(!row.assetId)continue;
+      if(row.quoteMode!=='MANUAL'){
+        try{await this.host.updateQuoteMode(row.assetId,'MANUAL');modeUpdated++;}
+        catch{failed++;}
+      }
+      const price=prices.get(row.symbol);
+      if(!price)continue;
+      let close:number;
+      try{close=Number(nonnegative(price.value).toFixed(8));}catch{failed++;continue;}
+      if(!Number.isFinite(close)||close<=0){failed++;continue;}
+      try{
+        await this.host.updateQuote(row.assetId,{id:`${datePart}_${row.assetId.toUpperCase()}`,createdAt:new Date().toISOString(),dataSource:'BINANCE',
+          timestamp:new Date(price.asOf).toISOString(),assetId:row.assetId,open:close,high:close,low:close,volume:0,close,adjclose:close,currency:NATIVE_CURRENCY});
+        pushed++;
+      }catch{failed++;}
+    }
+    return {pushed,failed,modeUpdated};
   }
 }
 
 export function createHostBridge(api:AddonContext['api']):NativeHostBridge{
   const today=()=>{const d=new Date(),p=(n:number)=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;};
   const bindingKey=(key:string)=>`native-account-${key}`;
+  const COST_KEY='native-costs-v1';
   return {
     listAccounts:async()=>(await api.accounts.getAll()).map(a=>({id:a.id,name:a.name,accountType:a.accountType,currency:a.currency,trackingMode:a.trackingMode,provider:a.provider,providerAccountId:a.providerAccountId})),
     createAccount:async input=>{const a=await api.accounts.create(input);return {id:a.id,name:a.name,accountType:a.accountType,currency:a.currency,trackingMode:a.trackingMode,provider:a.provider,providerAccountId:a.providerAccountId};},
@@ -181,6 +224,21 @@ export function createHostBridge(api:AddonContext['api']):NativeHostBridge{
     listSnapshots:async(accountId,from,to)=>(await api.snapshots.getAll(accountId,from,to)).map(s=>({snapshotDate:s.snapshotDate,positionCount:s.positionCount,cashCurrencyCount:s.cashCurrencyCount})),
     getByDate:async(accountId,date)=>(await api.snapshots.getByDate(accountId,date)).map(h=>({symbol:h.instrument?.symbol??'',quantity:h.quantity,assetId:h.instrument?.id,quoteMode:h.instrument?.quoteMode})),
     updateQuote:(assetId,quote)=>api.quotes.update(assetId,quote),
+    updateQuoteMode:async(assetId,mode)=>{await api.assets.updateQuoteMode(assetId,mode);},
+    readCosts:async()=>{
+      try{
+        const raw=await api.storage.get(COST_KEY);
+        if(!raw)return {};
+        const parsed=JSON.parse(raw) as Record<string,{unitCost?:unknown;source?:unknown;updatedAt?:unknown}>;
+        const out:Record<string,{unitCost:string;source?:string;updatedAt?:string}>={};
+        for(const [code,entry] of Object.entries(parsed)){
+          if(typeof entry?.unitCost!=='string'||!/^[A-Z0-9]{1,20}$/.test(code))continue;
+          out[code]={unitCost:entry.unitCost,...(typeof entry.source==='string'?{source:entry.source}:{}),...(typeof entry.updatedAt==='string'?{updatedAt:entry.updatedAt}:{})};
+        }
+        return out;
+      }catch{return {};}
+    },
+    writeCosts:async book=>{await api.storage.set(COST_KEY,JSON.stringify(book));},
     baseCurrency:async()=>(await api.settings.get()).baseCurrency,
     rateForDate:async(from,to,date)=>{const [row]=await api.exchangeRates.getRatesForDates([{fromCurrency:from,toCurrency:to,date}]);return {rate:row?.rate??null,error:row?.error??null};},
     listRates:async()=>(await api.exchangeRates.getAll()).map(r=>({fromCurrency:r.fromCurrency,toCurrency:r.toCurrency,rate:r.rate,source:r.source,timestamp:r.timestamp})),

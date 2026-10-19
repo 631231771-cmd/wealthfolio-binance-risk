@@ -78,15 +78,30 @@ function harness(overrides:{rate?:number|null;base?:string;existing?:NativeAccou
  const accounts:NativeAccount[]=[...(overrides.existing??[])];
  const saves:{accountId:string;holdings:any[];cash:Record<string,string>;date:string}[]=[];
  const quotes:string[]=[];
+ const modes=new Map<string,'MARKET'|'MANUAL'>();
+ const quoteStore=new Map<string,{price:number;source:string}>();
  let checkCalls=0,createCalls=0,boundId:string|null=null,saveFail=false,readFail=false;
  const bridge:NativeHostBridge={
   listAccounts:async()=>accounts,
   createAccount:async input=>{createCalls++;const a:NativeAccount={id:'acc-new',...input};accounts.push(a);return a;},
   checkImport:async()=>{checkCalls++;return {existingDates:[],symbols:[],validationErrors:[]};},
-  saveSnapshot:async(accountId,holdings,cash,date)=>{if(saveFail){saveFail=false;throw new Error('save');}saves.push({accountId,holdings,cash,date});},
+  saveSnapshot:async(accountId,holdings,cash,date)=>{
+    if(saveFail){saveFail=false;throw new Error('save');}
+    saves.push({accountId,holdings,cash,date});
+    // 复刻宿主副作用：MANUAL 资产在快照时用 averageCost 生成 12:00 备用报价。
+    for(const h of holdings){
+      const assetId='asset-'+h.symbol;
+      if((overrides.manual||modes.get(assetId)==='MANUAL')&&h.averageCost){
+        quoteStore.set(`${date.replaceAll('-','')}_${assetId.toUpperCase()}`,{price:Number(h.averageCost),source:'MANUAL'});
+      }
+    }
+  },
   listSnapshots:async()=>[{snapshotDate:DATE,positionCount:saves.at(-1)?.holdings.length??0,cashCurrencyCount:Object.keys(saves.at(-1)?.cash??{}).length}],
-  getByDate:async()=>{if(readFail){readFail=false;throw new Error('read');}return (saves.at(-1)?.holdings??[]).map(h=>({symbol:h.symbol,quantity:Number(h.quantity),assetId:'asset-'+h.symbol,quoteMode:overrides.manual?'MANUAL':'MARKET'}));},
-  updateQuote:async(assetId)=>{if(overrides.quoteFail)throw new Error('x');quotes.push(assetId);},
+  getByDate:async()=>{if(readFail){readFail=false;throw new Error('read');}return (saves.at(-1)?.holdings??[]).map(h=>({symbol:h.symbol,quantity:Number(h.quantity),assetId:'asset-'+h.symbol,quoteMode:modes.get('asset-'+h.symbol)??(overrides.manual?'MANUAL':'MARKET')}));},
+  updateQuote:async(assetId,quote)=>{if(overrides.quoteFail)throw new Error('x');quoteStore.set(quote.id,{price:quote.close,source:quote.dataSource});quotes.push(assetId);},
+  updateQuoteMode:async(assetId,mode)=>{modes.set(assetId,mode);},
+  readCosts:async()=>({}),
+  writeCosts:async()=>{},
   baseCurrency:async()=>overrides.base??'USD',
   rateForDate:async()=>overrides.dated??{rate:null,error:'Invalid currency code: USDT'},
   listRates:async()=>overrides.records??(overrides.rate===null?[]:[{fromCurrency:'USDT',toCurrency:'USD',rate:overrides.rate===undefined?0.9998:overrides.rate,source:'MANUAL',timestamp:'2026-10-19T00:00:00Z'}]),
@@ -94,7 +109,7 @@ function harness(overrides:{rate?:number|null;base?:string;existing?:NativeAccou
   readBinding:async()=>boundId,
   writeBinding:async(_key,id)=>{boundId=id;}
  };
- return {bridge,saves,quotes,accounts,get createCalls(){return createCalls;},get checkCalls(){return checkCalls;},failNextSave:()=>{saveFail=true;},failNextRead:()=>{readFail=true;}};
+ return {bridge,saves,quotes,accounts,modes,quoteStore,get createCalls(){return createCalls;},get checkCalls(){return checkCalls;},failNextSave:()=>{saveFail=true;},failNextRead:()=>{readFail=true;}};
 }
 test('预览：无绑定账户时建议创建；USDT→基础货币无汇率时阻止写入',async()=>{
  const v=base();
@@ -145,13 +160,15 @@ test('MANUAL 资产不覆盖报价；报价失败不回滚持仓',async()=>{
  const manual=harness({manual:true});const v=base();
  const p1=await new NativeSync(manual.bridge).preview(v,KEY,{},{allowUnknownCost:true});
  const r1=await new NativeSync(manual.bridge).apply(v,KEY,{},p1,'WRITE');
- assert.equal(r1.quotesPushed,0);
+ // MANUAL 只表示不参与宿主提供者同步；本连接器仍写入市场报价。
+ assert.equal(r1.quotesPushed,2);assert.equal(r1.quoteModeUpdated,0);
  const failing=harness({quoteFail:true});
  const p2=await new NativeSync(failing.bridge).preview(v,KEY,{},{allowUnknownCost:true});
  const r2=await new NativeSync(failing.bridge).apply(v,KEY,{},p2,'WRITE');
  assert.equal(r2.quotesPushed,0);assert.equal(r2.quoteFailures,2);
  assert.equal(r2.reconcile?.ok,true);
- assert.ok(r2.warnings.some(w=>w.includes('报价写入失败')));
+ assert.equal(r2.stage,'quotes-partial');
+ assert.ok(r2.warnings.some(w=>w.includes('报价或报价模式写入失败')));
 });
 test('宿主不可用时预览直接报固定错误，不伪造成功',async()=>{
  const bridge={listAccounts:async()=>{throw new Error('boom');}} as unknown as NativeHostBridge;
@@ -253,4 +270,30 @@ test('汇率接口权限被拒绝时区分于缺少汇率，并保持写入阻�
  assert.equal(probe.rateDiagnostic.status,'permission-denied');
  const preview=await new NativeSync(h.bridge).preview(base(),KEY,{},{allowUnknownCost:true});
  assert.ok(preview.blocked.includes('NO_USDT_RATE'));
+});
+
+test('MANUAL 快照的成本备用报价被市场价覆盖，成本不会成为最终市价',async()=>{
+ const v=valuation([{asset:'BTC',free:'1'},{asset:'USDT',free:'100'}],{BTC:'700',USDT:'1'});
+ const costs={BTC:{unitCost:'500'},USDT:{unitCost:'1'}};
+ const h=harness();const sync=new NativeSync(h.bridge);
+ const p1=await sync.preview(v,KEY,costs);await sync.apply(v,KEY,costs,p1,'WRITE');
+ const p2=await sync.preview(v,KEY,costs);const r2=await sync.apply(v,KEY,costs,p2,'WRITE');
+ assert.equal(r2.stage,'reconciled');
+ const id=`${DATE.replaceAll('-','')}_ASSET-BTC`;
+ assert.equal(h.quoteStore.get(id)?.price,700);
+ assert.equal(h.quoteStore.get(id)?.source,'BINANCE');
+ assert.equal(h.modes.get('asset-BTC'),'MANUAL'); // 宿主不再把该资产交给默认提供者
+});
+test('提交状态区分已对账、报价待修复与读回失败',async()=>{
+ const v=valuation([{asset:'BTC',free:'1'},{asset:'USDT',free:'100'}],{BTC:'700',USDT:'1'});
+ const costs={BTC:{unitCost:'500'},USDT:{unitCost:'1'}};
+ const ok=new NativeSync(harness().bridge);const p=await ok.preview(v,KEY,costs);
+ assert.equal((await ok.apply(v,KEY,costs,p,'WRITE')).stage,'reconciled');
+ const qf=harness({quoteFail:true});const s2=new NativeSync(qf.bridge);const p2=await s2.preview(v,KEY,costs);
+ const r2=await s2.apply(v,KEY,costs,p2,'WRITE');
+ assert.equal(r2.stage,'quotes-partial');
+ assert.ok(r2.warnings.some(w=>w.includes('仅修复报价')));
+ const rf=harness();const s3=new NativeSync(rf.bridge);const p3=await s3.preview(v,KEY,costs);
+ rf.failNextRead();
+ assert.equal((await s3.apply(v,KEY,costs,p3,'WRITE')).stage,'readback-failed');
 });

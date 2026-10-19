@@ -1,7 +1,7 @@
 {
   "id": "wealthfolio-binance-risk",
   "name": "币安资产总览",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Binance Spot 只读连接、原生账户同步与成本基础；历史估值与公开行情独立，未核实成本不计算盈亏。",
   "author": "个人项目",
   "main": "dist/addon.js",
@@ -78,6 +78,13 @@
         "update"
       ],
       "purpose": "把 Binance 公开行情写入已映射资产的报价；跳过手动报价资产"
+    },
+    {
+      "category": "assets",
+      "functions": [
+        "updateQuoteMode"
+      ],
+      "purpose": "把本连接器管理的资产设为 MANUAL，停止宿主默认提供者反复请求不兼容的行情；不修改资产身份或其他账户持仓"
     },
     {
       "category": "currency",

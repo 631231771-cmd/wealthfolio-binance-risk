@@ -41,11 +41,23 @@ export function NativePanel({reader,host,onCosts,initialCosts}:{reader:DirectSpo
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
   const [confirmed,setConfirmed]=useState(false);
+  const [costConfirmed,setCostConfirmed]=useState<Set<string>>(new Set());
   const [draft,setDraft]=useState<Record<string,string>>(()=>Object.fromEntries(Object.entries(initialCosts??{}).map(([code,v])=>[code,v.unitCost])));
-  useEffect(()=>{if(initialCosts)onCosts?.(initialCosts);},[]);
+  useEffect(()=>{
+    if(initialCosts){onCosts?.(initialCosts);return;}
+    if(!host)return;
+    let active=true;
+    void host.readCosts().then(saved=>{
+      if(!active)return;
+      setDraft(Object.fromEntries(Object.entries(saved).map(([code,v])=>[code,v.unitCost])));
+      setCostConfirmed(new Set(Object.entries(saved).filter(([,v])=>v.source==='confirmed').map(([code])=>code)));
+    }).catch(()=>{});
+    return()=>{active=false;};
+  },[]);
   const sync=useMemo(()=>host?new NativeSync(host):null,[host]);
   const {state,report}=reader.valued();
-  const book:CostBook=Object.fromEntries(Object.entries(draft).filter(([,v])=>v.trim()).map(([code,unitCost])=>[code,{unitCost:unitCost.trim()}]));
+  const bookFrom=(values:Record<string,string>,confirmedCodes:Set<string>):CostBook=>Object.fromEntries(Object.entries(values).filter(([,v])=>v.trim()).map(([code,unitCost])=>[code,{unitCost:unitCost.trim(),source:confirmedCodes.has(code)?'confirmed' as const:'entered' as const,updatedAt:new Date().toISOString()}]));
+  const book:CostBook=bookFrom(draft,costConfirmed);
   const costs=costSummary(state,report,book);
   const headline=costHeadline(costs);
   const accountKey=reader.getAccountKey?.()??null;
@@ -53,7 +65,20 @@ export function NativePanel({reader,host,onCosts,initialCosts}:{reader:DirectSpo
   const signed=(value:string|null)=>{if(value===null)return '—';const n=Number(value);return `${n<0?'-':'+'}${money(Math.abs(n).toFixed(2))}`;};
 
   const run=async(action:()=>Promise<void>)=>{setBusy(true);setMessage('');try{await action();}catch(error){setMessage(error instanceof NativeSyncError?(errorText[error.code]??error.code):'操作未完成，未写入任何内容。');}finally{setBusy(false);}};
-  const setCost=(code:string,value:string)=>{const next={...draft,...(value.trim()?{[code]:value}:{})};if(!value.trim())delete next[code];setDraft(next);onCosts?.(Object.fromEntries(Object.entries(next).filter(([,v])=>v.trim()).map(([c,v])=>[c,{unitCost:v.trim()}])));setPreview(null);setConfirmed(false);};
+  const persist=(values:Record<string,string>,confirmedCodes:Set<string>)=>{if(host)void host.writeCosts(bookFrom(values,confirmedCodes)).catch(()=>{});};
+  const setCost=(code:string,value:string)=>{
+    const next={...draft,...(value.trim()?{[code]:value}:{})};
+    if(!value.trim())delete next[code];
+    const nextConfirmed=new Set(costConfirmed);nextConfirmed.delete(code);
+    setDraft(next);setCostConfirmed(nextConfirmed);
+    onCosts?.(bookFrom(next,nextConfirmed));persist(next,nextConfirmed);
+    setPreview(null);setConfirmed(false);
+  };
+  const confirmAll=()=>{
+    const next=new Set(Object.keys(draft).filter(code=>draft[code].trim()));
+    setCostConfirmed(next);onCosts?.(bookFrom(draft,next));persist(draft,next);
+    setPreview(null);setConfirmed(false);
+  };
 
   if(!host||!sync)return <section className="portfolio-card native-page"><div className="section-heading"><h2>Wealthfolio 原生账户</h2><span>不可用</span></div><p className="native-empty">当前环境没有宿主 API（浏览器预览或测试）。原生写入只在 Wealthfolio 客户端内可用。</p></section>;
 
@@ -76,23 +101,24 @@ export function NativePanel({reader,host,onCosts,initialCosts}:{reader:DirectSpo
     </section>
 
     <section className="portfolio-card">
-      <div className="section-heading"><h2>成本基础</h2><span>{headline.label}</span></div>
-      <p className="native-lead">成本由本人按单位成本（USDT）录入，仅保存在本次会话，并随快照写入原生 <code>averageCost</code>。未知成本保持未知，不按零计算。</p>
-      <div className="table-scroll"><table className="portfolio-table native-cost-table"><thead><tr><th>资产</th><th>数量</th><th>单位成本</th><th>市值</th><th>未实现盈亏</th></tr></thead><tbody>
+      <div className="section-heading"><h2>成本基础</h2><span className="cost-heading">{headline.basis}<button className="button-quiet cost-confirm" disabled={!Object.keys(draft).length} onClick={confirmAll}>确认全部成本</button></span></div>
+      <p className="native-lead">按单位成本（USDT）录入：数量 × 单位成本 = 当前持仓总成本。成本保存在本机插件存储（不含密钥），并随快照写入原生 <code>averageCost</code>。未确认的填写只表示“已填写”，不代表真实买入成本。</p>
+      <div className="table-scroll"><table className="portfolio-table native-cost-table"><thead><tr><th>资产</th><th>数量</th><th>单位成本</th><th>总成本</th><th>市值</th><th>未实现盈亏</th></tr></thead><tbody>
         {rows.map(position=>{
           const row=costs.rows.find(r=>r.code===position.asset.code);
           const gainValue=row?.gain?Number(row.gain):null;
           const pctValue=row?.gainPct?Number(row.gainPct):null;
           return <tr key={position.asset.code}>
-            <td><strong>{position.asset.code}</strong></td>
+            <td><strong>{position.asset.code}</strong>{row?.costKnown&&<small className="cost-source">{row.source==='confirmed'?'已确认':row.source==='rebuilt'?'成交重建':'待确认'}</small>}</td>
             <td className="number quantity">{displayQuantity(position.quantity)}</td>
             <td className="number"><input className="cost-input" inputMode="decimal" aria-label={`${position.asset.code} 单位成本`} placeholder="未知" value={draft[position.asset.code]??''} onChange={e=>setCost(position.asset.code,e.target.value)}/></td>
+            <td className="number value">{row?.cost?money(row.cost):'—'}</td>
             <td className="number value">{money(row?.value)}</td>
             <td className={'number value'+(gainValue===null||!Number.isFinite(gainValue)?'':gainValue<0?' is-down':' is-up')}>{gainValue===null||!Number.isFinite(gainValue)?'—':`${gainValue<0?'-':'+'}${money(Math.abs(gainValue).toFixed(2))}${pctValue!==null?` · ${(pctValue*100).toFixed(2)}%`:''}`}</td>
           </tr>;
         })}
       </tbody></table></div>
-      <p className="native-summary">{costs.state==='none'?'尚未录入任何成本；未知成本不会按零计算。':<>已核实成本覆盖 <strong>{costs.coverage?percent(costs.coverage):'—'}</strong> · 已核实市值 {money(costs.knownValue)} USDT{costs.gain?` · 未实现 ${signed(costs.gain)} USDT`:''}{costs.state!=='complete'&&' · 仅代表已核实成本部分'}</>}</p>
+      <p className="native-summary">{costs.state==='none'?'尚未录入任何成本；未知成本不会按零计算。':<>已填写成本覆盖 <strong>{costs.coverage?percent(costs.coverage):'—'}</strong> · 已填写市值 {money(costs.knownValue)} USDT{costs.gain?` · 未实现 ${signed(costs.gain)} USDT`:''}{costs.state!=='complete'&&' · 仅代表已填写成本部分'}{!costs.allConfirmed&&' · 待确认'}</>}</p>
     </section>
 
     {preview&&<section className="portfolio-card native-preview">
@@ -114,14 +140,15 @@ export function NativePanel({reader,host,onCosts,initialCosts}:{reader:DirectSpo
     </section>}
 
     {result&&<section className="portfolio-card">
-      <div className="section-heading"><h2>写入结果</h2><span>{result.readback==='failed'?'已提交 · 未读回':result.reconcile?.ok?'读回一致':'需要核对'}</span></div>
+      <div className="section-heading"><h2>写入结果</h2><span>{result.stage==='reconciled'?'已对账':result.stage==='quotes-partial'?'持仓已写入 · 报价待修复':'已提交 · 未读回'}</span></div>
       <dl className="native-meta">
         <div><dt>账户</dt><dd>{result.accountId.slice(0,8)} · {result.created?'本次创建':'已绑定'}</dd></div>
         <div><dt>快照</dt><dd>{result.snapshotDate} · {result.positionCount} 项持仓 · {result.cashCurrencyCount} 种现金</dd></div>
         <div><dt>读回对账</dt><dd>{result.readback==='failed'?'未完成':`${result.reconcile?.matched??0} 项一致${result.reconcile?.mismatched.length?` · ${result.reconcile.mismatched.length} 项不一致`:''}${result.reconcile?.missing.length?` · 缺失 ${result.reconcile.missing.join('、')}`:''}`}</dd></div>
-        <div><dt>报价</dt><dd>已写 {result.quotesPushed} 项{result.quoteFailures?` · 失败 ${result.quoteFailures} 项`:''}</dd></div>
+        <div><dt>报价</dt><dd>已写 {result.quotesPushed} 项 · 模式切换 {result.quoteModeUpdated} 项{result.quoteFailures?` · 失败 ${result.quoteFailures} 项`:''}</dd></div>
       </dl>
       {result.warnings.length>0&&<ul className="native-warnings">{result.warnings.map((w,i)=><li key={i}>{w}</li>)}</ul>}
+      {result.stage==='quotes-partial'&&<button className="button-primary native-repair" disabled={busy} onClick={()=>void run(async()=>{const r=await sync.repairQuotes(reader.valued(),result.accountId,result.snapshotDate);setMessage(`报价修复：成功 ${r.pushed} 项，失败 ${r.failed} 项，模式切换 ${r.modeUpdated} 项。`);})}>仅修复报价</button>}
       <p className="native-summary">请到 Wealthfolio 原生账户页核对持仓与总额。本插件不会自动重试或重复写入。</p>
     </section>}
   </div>;

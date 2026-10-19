@@ -14,7 +14,7 @@ function valuation(balances:{asset:string;free:string}[],prices:Record<string,st
 const v=()=>valuation([{asset:'USDT',free:'100'},{asset:'BTC',free:'0.01'}],{USDT:'1',BTC:'65000'});
 
 test('全部成本已知：盈亏分母是成本，不是市值',()=>{
- const s=costSummary(v().state,v().report,{BTC:{unitCost:'60000'},USDT:{unitCost:'1'}});
+ const s=costSummary(v().state,v().report,{BTC:{unitCost:'60000',source:'confirmed'},USDT:{unitCost:'1'}});
  assert.equal(s.state,'complete');
  assert.equal(s.totalValue,'750.00000000');
  assert.equal(s.knownValue,'750.00000000');
@@ -22,7 +22,7 @@ test('全部成本已知：盈亏分母是成本，不是市值',()=>{
  assert.equal(s.gain,'50.00000000');
  assert.equal(s.gainPct,'0.071429');
  assert.equal(s.coverage,'1.000000');
- assert.deepEqual(costHeadline(s),{label:'持仓累计盈亏',value:'50.00000000',pct:'0.071429',scope:'complete'});
+ assert.deepEqual(costHeadline(s),{label:'持仓累计盈亏',value:'50.00000000',pct:'0.071429',scope:'complete',basis:'已确认成本'});
 });
 test('部分成本已知：只汇总已核实部分并明确标注，USDT现金按面值',()=>{
  const v3=valuation([{asset:'USDT',free:'100'},{asset:'BTC',free:'0.01'},{asset:'ETH',free:'1'}],{USDT:'1',BTC:'65000',ETH:'2500'});
@@ -35,7 +35,7 @@ test('部分成本已知：只汇总已核实部分并明确标注，USDT现金�
  assert.equal(s.rows.find(r=>r.code==='USDT')?.costKnown,true);
  assert.equal(s.rows.find(r=>r.code==='ETH')?.costKnown,false);
  assert.equal(costHeadline(s).scope,'partial');
- assert.equal(costHeadline(s).label,'仅已核实成本部分');
+ assert.equal(costHeadline(s).label,'仅已填写成本部分');
 });
 test('只有现金时成本完整且盈亏为零；证券缺成本时为部分覆盖',()=>{
  const cash=valuation([{asset:'USDT',free:'100'}],{USDT:'1'});
@@ -64,4 +64,14 @@ test('未定价资产不进入分母，也不会被成本补出一个市值',()=
  assert.equal(s.totalValue,'750.00000000'); // NOPAIR 不在已定价范围
  assert.equal(s.state,'partial');
  assert.equal(s.rows.find(r=>r.code==='NOPAIR')?.value,undefined);
+});
+
+test('成本来源区分待确认与已确认，未确认不称为已核实',()=>{
+ const vv=valuation([{asset:'BTC',free:'1'},{asset:'USDT',free:'100'}],{BTC:'700',USDT:'1'});
+ const entered=costSummary(vv.state,vv.report,{BTC:{unitCost:'500',source:'entered'},USDT:{unitCost:'1'}});
+ assert.equal(entered.allConfirmed,false);
+ assert.equal(costHeadline(entered).basis,'已填写成本（待确认）');
+ const confirmed=costSummary(vv.state,vv.report,{BTC:{unitCost:'500',source:'confirmed'},USDT:{unitCost:'1'}});
+ assert.equal(confirmed.allConfirmed,true);
+ assert.equal(costHeadline(confirmed).basis,'已确认成本');
 });

@@ -501,3 +501,13 @@ main/v0.1.3 保存基线提交 91f3432；本轮 feature/spot-readonly-offline �
 - ZIP `artifacts/wealthfolio-binance-risk-0.3.2.zip`，SHA256 `b312a90cfcca8b2c9e8fd195fd1cd6ba350e63c9ee35976ea00e65e3d06d6bb9`；回执 `BUILD-RECEIPT-0.3.2.json`（指纹 `397c01b9…`，trackedChanges=false）。
 - 虚构预览确认：汇率显示 `1.000000 · 最新记录 · 2026-10-19`，成本完整时 Hero 为"持仓累计盈亏"，预览不再误阻断。
 - 未验证：真实客户端安装、真实手动汇率读取、原生账户总额。
+
+## v0.4.0 原生报价与成本口径（2026-10-19）
+
+- 基线 `6b1350f`；分支 `review/ds-0.4.0`；工作树 `F:/Code/wrisk-ds`。
+- 报价：宿主 `sync.rs` 只同步 `QuoteMode::Market`；写入后 `assets.updateQuoteMode(MANUAL)` 停止默认提供者。市场报价复用宿主成本备用报价 id（`YYYYMMDD_ASSETID`）覆盖，成本不会成为最终市价。
+- 提交：`reconciled` / `quotes-partial` / `readback-failed`；`quotes-partial` 可仅修复报价。
+- 成本：来源 entered/confirmed/rebuilt/imported；数量×单位成本=总成本；确认全部后才称已确认；持久化 `native-costs-v1`。
+- **258 项测试通过**（+4），tsc 0 错；完整 `npm run verify` 通过（build/ZIP/smoke/receipt/13 项原生自检）。
+- ZIP `artifacts/wealthfolio-binance-risk-0.4.0.zip`，SHA256 `20662be994b519009cafb331a1ad7045f8e45e912e325ee65cb3ff3f290dd25a`。
+- 未执行：真实客户端写入、真实 Profile、真实 myTrades、后台自动同步。

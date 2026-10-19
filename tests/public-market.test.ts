@@ -42,13 +42,14 @@ test('公开构造固定HTTPS主机/三个GET；不支持私人路径、URL或�
 test('清单只声明本轮需要的原生写入权限，且不含删除或组合重算能力',()=>{
   const manifest=JSON.parse(readFileSync('manifest.json','utf8'));
   assert.deepEqual(manifest.network,{allowedHosts:['data-api.binance.vision','api.binance.com']});
-  assert.deepEqual(manifest.permissions.map((p:any)=>p.category),['secrets','files','network','accounts','snapshots','quotes','currency','settings']);
+  assert.deepEqual(manifest.permissions.map((p:any)=>p.category),['secrets','files','network','accounts','snapshots','quotes','assets','currency','settings']);
   const fns=(category:string)=>manifest.permissions.find((p:any)=>p.category===category).functions;
   assert.deepEqual(fns('network'),['request']);
   assert.deepEqual(fns('secrets'),['set','get','delete']);
   assert.deepEqual(fns('accounts'),['getAll','create']);
   assert.deepEqual(fns('snapshots'),['getAll','getByDate','checkImport','save']);
   assert.deepEqual(fns('quotes'),['update']);
+  assert.deepEqual(fns('assets'),['updateQuoteMode']);
   assert.deepEqual(fns('currency'),['getAll','getRatesForDates']);
   assert.deepEqual(fns('settings'),['get']);
   for(const forbidden of ['portfolio','activities','market-data','performance','alternative-assets'])assert.ok(!manifest.permissions.some((p:any)=>p.category===forbidden),forbidden);

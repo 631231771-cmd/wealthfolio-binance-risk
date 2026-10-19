@@ -23,7 +23,7 @@ const reader=(v:ReturnType<typeof value>)=>({valued:()=>v,getAccountKey:()=>KEY}
 const host=()=>({
  listAccounts:async()=>[],createAccount:async()=>{throw new Error('no');},checkImport:async()=>({existingDates:[],symbols:[],validationErrors:[]}),
  saveSnapshot:async()=>{},listSnapshots:async()=>[],getByDate:async()=>[],updateQuote:async()=>{},
- baseCurrency:async()=>'USD',rateForDate:async()=>({rate:null,error:'Invalid currency code: USDT'}),listRates:async()=>[{fromCurrency:'USDT',toCurrency:'USD',rate:0.9998,source:'MANUAL',timestamp:'2026-10-19T00:00:00Z'}],today:()=>'2026-10-19',readBinding:async()=>null,writeBinding:async()=>{}
+ baseCurrency:async()=>'USD',rateForDate:async()=>({rate:null,error:'Invalid currency code: USDT'}),listRates:async()=>[{fromCurrency:'USDT',toCurrency:'USD',rate:0.9998,source:'MANUAL',timestamp:'2026-10-19T00:00:00Z'}],updateQuoteMode:async()=>{},readCosts:async()=>({}),writeCosts:async()=>{},today:()=>'2026-10-19',readBinding:async()=>null,writeBinding:async()=>{}
 } as NativeHostBridge);
 
 test('无宿主时明确说明原生写入不可用，不展示可点击的写入按钮',()=>{
@@ -52,4 +52,12 @@ test('负的未实现盈亏不会崩溃，显示负号与下跌色',()=>{
  const html=renderToStaticMarkup(createElement(NativePanel,{reader:reader(value()),host:host(),initialCosts:{BTC:{unitCost:'70000'},USDT:{unitCost:'1'}}}));
  assert.ok(html.includes('-50.00'));
  assert.ok(html.includes('is-down'));
+});
+
+test('成本表显示总成本、来源标签与确认入口，不把填写称为已核实',()=>{
+ const html=renderToStaticMarkup(createElement(NativePanel,{reader:reader(value()),host:host(),initialCosts:{BTC:{unitCost:'70000'},USDT:{unitCost:'1'}}}));
+ assert.ok(html.includes('总成本'));
+ assert.ok(html.includes('确认全部成本'));
+ assert.ok(html.includes('待确认'));
+ assert.ok(!html.includes('已核实'));
 });

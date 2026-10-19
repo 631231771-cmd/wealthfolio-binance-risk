@@ -1,6 +1,15 @@
 # 当前状态
 
-## v0.3.2 汇率读取修复（2026-10-19）
+## v0.4.0 原生报价与成本口径（2026-10-19）
+
+- 基线 6b1350f（0.3.2）；新分支 review/ds-0.4.0；工作树 F:\Code\wrisk-ds，未推送。
+- 报价：写入后 `assets.updateQuoteMode(MANUAL)` 停止 Yahoo（宿主只同步 MARKET）；市场报价用宿主成本备用报价同 id 覆盖；失败 stage=quotes-partial，可“仅修复报价”。新增 assets.updateQuoteMode 权限。
+- 成本：entered/confirmed/rebuilt/imported 来源；数量×单位成本=总成本；确认全部后才称已确认；持久化 storage native-costs-v1。
+- 提交状态：readback-failed / quotes-partial / reconciled。
+- 未完成：后台自动同步（页面内定时器）、myTrades 完整流程、真实 Profile 隔离与真实写入。
+- 验证：258 项测试、verify 通过；详见 docs/RELEASE-READINESS.md 与 ACCOUNT-MIGRATION.md。
+
+## v0.3.2 汇率读取修复（历史）
 
 - 基线 72fc6d0（0.3.1）；工作树 F:\Code\wrisk-ds，分支 review/ds-0.2.1，未推送。
 - 根因：Wealthfolio 3.10.0 `get_exchange_rate_for_date` 强制货币代码 3 位字母，USDT 被 InvalidCurrencyCode 拒绝；批量接口返回 rate=null。手动汇率在 `exchangeRates.getAll()` 中有效。
