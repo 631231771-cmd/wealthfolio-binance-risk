@@ -489,3 +489,15 @@ main/v0.1.3 保存基线提交 91f3432；本轮 feature/spot-readonly-offline �
 - ZIP `artifacts/wealthfolio-binance-risk-0.3.1.zip`，SHA256 `1e099c60dec38f3b5d4f137eeb34dd1fb64fb7f60356f6a3f1bc6c4a2d8e2b68`；回执 `BUILD-RECEIPT-0.3.1.json`（指纹 `b9422eef…`，trackedChanges=false）。
 - 虚构预览三态：默认阻断（成本未知）、显式允许后预览、写入后读回 5 项一致。**未对真实资料库写入。**
 - 未验证：真实客户端安装、原生账户总额与成本/收益显示、汇率缺失时宿主的实际 1.0 回退。
+
+## v0.3.2 汇率读取修复（2026-10-19）
+
+- 基线 `72fc6d0`；提交 `7c99ae9`；工作树 `F:\Code\wrisk-ds`，分支 review/ds-0.2.1。
+- 根因（源码确认）：`fx_service.rs::get_exchange_rate_for_date` 强制货币代码 3 位字母，`USDT` 返回 `InvalidCurrencyCode`；批量日期接口因此 `rate=null`，而 `exchangeRates.getAll()` 中手动 USDT/USD 记录有效。
+- 修复：日期接口优先，失败回退 `getAll()`（直向/反向），不默认 1；新增只读诊断（有效/较旧/无记录/无法解析/权限不足/接口不可用）；`currency` 增加 `getAll`。
+- 同时修复：负收益触发 `nonnegative` 抛错导致整页空白；USDT 现金按面值计入成本（盈亏 0），证券仍需成本。
+- 成本缺失：生产 UI 移除放行开关，正式资料库保持阻断；`allowUnknownCost` 仅用于虚构测试，smoke 断言包内不存在该文案。
+- **254 项测试通过**（+5：汇率回退、解析矩阵、权限诊断、负收益两处），tsc 0 错；完整 `npm run verify` 通过。
+- ZIP `artifacts/wealthfolio-binance-risk-0.3.2.zip`，SHA256 `b312a90cfcca8b2c9e8fd195fd1cd6ba350e63c9ee35976ea00e65e3d06d6bb9`；回执 `BUILD-RECEIPT-0.3.2.json`（指纹 `397c01b9…`，trackedChanges=false）。
+- 虚构预览确认：汇率显示 `1.000000 · 最新记录 · 2026-10-19`，成本完整时 Hero 为"持仓累计盈亏"，预览不再误阻断。
+- 未验证：真实客户端安装、真实手动汇率读取、原生账户总额。
