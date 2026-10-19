@@ -61,3 +61,24 @@ test('成本表显示总成本、来源标签与确认入口，不把填写称�
  assert.ok(html.includes('待确认'));
  assert.ok(!html.includes('已核实'));
 });
+
+function valueWithDust(){
+ const {account,snapshot}=spotSnapshot({uid:1,accountType:'SPOT',balances:[
+  {asset:'BTC',free:'1',locked:'0'},{asset:'USDT',free:'100',locked:'0'},
+  {asset:'D1',free:'1',locked:'0'},{asset:'D2',free:'1',locked:'0'}
+ ]},'external',AT,AT);
+ const prices:Record<string,string>={BTC:'650',USDT:'1',D1:'0.05',D2:'0.001'};
+ for(const p of snapshot.positions)if(prices[p.asset.code])p.price={value:prices[p.asset.code],currency:'USDT',asOf:AT,source:'external:test'};
+ const state:PortfolioState={schemaVersion:1,accounts:[account],snapshots:{[account.id]:snapshot},statuses:{[account.id]:{state:'ready',attemptedAt:AT}}};
+ return {state,report:spotRisk(state,NOW)};
+}
+test('成本页默认折叠微额，不要求录入成本，也不把填写率当核实率',()=>{
+ const html=renderToStaticMarkup(createElement(NativePanel,{reader:reader(valueWithDust()),host:host(),initialCosts:{BTC:{unitCost:'600'},USDT:{unitCost:'1'}}}));
+ assert.ok(html.includes('微额资产 2 项'));
+ assert.ok(html.includes('无需录入成本'));
+ assert.ok(html.includes('D1'));
+ assert.ok(html.includes('D2'));
+ assert.ok(!html.includes('aria-label="D1 单位成本"'));
+ assert.ok(!html.includes('aria-label="D2 单位成本"'));
+ assert.ok(html.includes('已填写成本覆盖'));
+});

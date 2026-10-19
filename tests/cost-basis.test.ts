@@ -75,3 +75,17 @@ test('成本来源区分待确认与已确认，未确认不称为已核实',()=
  assert.equal(confirmed.allConfirmed,true);
  assert.equal(costHeadline(confirmed).basis,'已确认成本');
 });
+
+test('微额不参与成本覆盖与收益率，也不产生缺成本问题',()=>{
+ const v9=valuation([
+  {asset:'USDT',free:'100'},{asset:'BTC',free:'1'},{asset:'ETH',free:'1'},
+  {asset:'D1',free:'1'},{asset:'D2',free:'1'},{asset:'D3',free:'1'},{asset:'D4',free:'1'},{asset:'D5',free:'1'},{asset:'D6',free:'1'}
+ ],{USDT:'1',BTC:'650',ETH:'2500',D1:'0.05',D2:'0.04',D3:'0.03',D4:'0.02',D5:'0.01',D6:'0.001'});
+ const s=costSummary(v9.state,v9.report,{BTC:{unitCost:'600',source:'confirmed'},ETH:{unitCost:'2400',source:'confirmed'}});
+ assert.equal(s.state,'complete');
+ assert.equal(s.issues.length,0);
+ assert.equal(s.rows.filter(r=>r.dust).length,6);
+ assert.equal(s.eligibleValue,'3250.00000000'); // BTC 650 + ETH 2500 + USDT 100
+ assert.equal(s.coverage,'1.000000');
+ assert.equal(s.knownValue,'3250.00000000');
+});

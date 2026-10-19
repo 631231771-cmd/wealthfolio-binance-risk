@@ -42,6 +42,7 @@ export function NativePanel({reader,host,onCosts,initialCosts}:{reader:DirectSpo
   const [message,setMessage]=useState('');
   const [confirmed,setConfirmed]=useState(false);
   const [costConfirmed,setCostConfirmed]=useState<Set<string>>(new Set());
+  const [excludeDust,setExcludeDust]=useState(true);
   const [draft,setDraft]=useState<Record<string,string>>(()=>Object.fromEntries(Object.entries(initialCosts??{}).map(([code,v])=>[code,v.unitCost])));
   useEffect(()=>{
     if(initialCosts){onCosts?.(initialCosts);return;}
@@ -63,6 +64,10 @@ export function NativePanel({reader,host,onCosts,initialCosts}:{reader:DirectSpo
   const accountKey=reader.getAccountKey?.()??null;
   const rows=Object.values(state.snapshots).flatMap(s=>s.positions).sort((a,b)=>a.asset.code.localeCompare(b.asset.code));
   const signed=(value:string|null)=>{if(value===null)return '—';const n=Number(value);return `${n<0?'-':'+'}${money(Math.abs(n).toFixed(2))}`;};
+  const byValue=(a:{value?:string},b:{value?:string})=>Number(b.value??0)-Number(a.value??0);
+  const normalCosts=costs.rows.filter(r=>!r.dust).sort(byValue);
+  const dustCosts=costs.rows.filter(r=>r.dust).sort(byValue);
+  const dustValue=dustCosts.reduce((sum,r)=>sum+Number(r.value??0),0);
 
   const run=async(action:()=>Promise<void>)=>{setBusy(true);setMessage('');try{await action();}catch(error){setMessage(error instanceof NativeSyncError?(errorText[error.code]??error.code):'操作未完成，未写入任何内容。');}finally{setBusy(false);}};
   const persist=(values:Record<string,string>,confirmedCodes:Set<string>)=>{if(host)void host.writeCosts(bookFrom(values,confirmedCodes)).catch(()=>{});};
@@ -88,7 +93,7 @@ export function NativePanel({reader,host,onCosts,initialCosts}:{reader:DirectSpo
       <p className="native-lead">把当前 Binance Spot 持仓写入一个独立的 <strong>CRYPTOCURRENCY · HOLDINGS</strong> 原生账户。不会修改其他账户、历史模拟账户或已有资产的成本。</p>
       <div className="native-actions">
         <button disabled={busy||!accountKey} onClick={()=>void run(async()=>{const next=await sync.probe(accountKey!);setProbe(next);setMessage(next.available?'':'宿主不可用，未做任何写入。');})}>检测宿主能力</button>
-        <button className="button-primary" disabled={busy||!accountKey} onClick={()=>void run(async()=>{const next=await sync.preview(reader.valued(),accountKey!,book);setPreview(next);setResult(null);setConfirmed(false);setProbe({available:true,baseCurrency:next.plan.baseCurrency,usdtRate:next.rate,rateDiagnostic:next.rateDiagnostic,accountCount:0,bound:next.bound,reasons:next.blocked});})}>生成导入预览</button>
+        <button className="button-primary" disabled={busy||!accountKey} onClick={()=>void run(async()=>{const next=await sync.preview(reader.valued(),accountKey!,book,{excludeDust});setPreview(next);setResult(null);setConfirmed(false);setProbe({available:true,baseCurrency:next.plan.baseCurrency,usdtRate:next.rate,rateDiagnostic:next.rateDiagnostic,accountCount:0,bound:next.bound,reasons:next.blocked});})}>生成导入预览</button>
       </div>
       {!accountKey&&<p className="native-warn">请先完成本人确认的余额查询；账户绑定使用不可逆短哈希，不保存原始 UID。</p>}
       {probe&&<dl className="native-meta">
@@ -104,20 +109,26 @@ export function NativePanel({reader,host,onCosts,initialCosts}:{reader:DirectSpo
       <div className="section-heading"><h2>成本基础</h2><span className="cost-heading">{headline.basis}<button className="button-quiet cost-confirm" disabled={!Object.keys(draft).length} onClick={confirmAll}>确认全部成本</button></span></div>
       <p className="native-lead">按单位成本（USDT）录入：数量 × 单位成本 = 当前持仓总成本。成本保存在本机插件存储（不含密钥），并随快照写入原生 <code>averageCost</code>。未确认的填写只表示“已填写”，不代表真实买入成本。</p>
       <div className="table-scroll"><table className="portfolio-table native-cost-table"><thead><tr><th>资产</th><th>数量</th><th>单位成本</th><th>总成本</th><th>市值</th><th>未实现盈亏</th></tr></thead><tbody>
-        {rows.map(position=>{
-          const row=costs.rows.find(r=>r.code===position.asset.code);
-          const gainValue=row?.gain?Number(row.gain):null;
-          const pctValue=row?.gainPct?Number(row.gainPct):null;
-          return <tr key={position.asset.code}>
-            <td><strong>{position.asset.code}</strong>{row?.costKnown&&<small className="cost-source">{row.source==='confirmed'?'已确认':row.source==='rebuilt'?'成交重建':'待确认'}</small>}</td>
-            <td className="number quantity">{displayQuantity(position.quantity)}</td>
-            <td className="number"><input className="cost-input" inputMode="decimal" aria-label={`${position.asset.code} 单位成本`} placeholder="未知" value={draft[position.asset.code]??''} onChange={e=>setCost(position.asset.code,e.target.value)}/></td>
-            <td className="number value">{row?.cost?money(row.cost):'—'}</td>
-            <td className="number value">{money(row?.value)}</td>
+        {normalCosts.map(row=>{
+          const gainValue=row.gain?Number(row.gain):null;
+          const pctValue=row.gainPct?Number(row.gainPct):null;
+          return <tr key={row.code}>
+            <td><strong>{row.code}</strong>{row.costKnown&&<small className="cost-source">{row.source==='confirmed'?'已确认':row.source==='rebuilt'?'成交重建':'待确认'}</small>}</td>
+            <td className="number quantity">{displayQuantity(row.quantity)}</td>
+            <td className="number"><input className="cost-input" inputMode="decimal" aria-label={`${row.code} 单位成本`} placeholder="未知" value={draft[row.code]??''} onChange={e=>setCost(row.code,e.target.value)}/></td>
+            <td className="number value">{row.cost?money(row.cost):'—'}</td>
+            <td className="number value">{money(row.value)}</td>
             <td className={'number value'+(gainValue===null||!Number.isFinite(gainValue)?'':gainValue<0?' is-down':' is-up')}>{gainValue===null||!Number.isFinite(gainValue)?'—':`${gainValue<0?'-':'+'}${money(Math.abs(gainValue).toFixed(2))}${pctValue!==null?` · ${(pctValue*100).toFixed(2)}%`:''}`}</td>
           </tr>;
         })}
       </tbody></table></div>
+      {dustCosts.length>0&&<details className="cost-dust">
+        <summary>微额资产 {dustCosts.length} 项 · 合计 {money(dustValue.toFixed(2))} USDT · 无需录入成本</summary>
+        <div className="table-scroll"><table className="portfolio-table native-cost-table"><thead><tr><th>资产</th><th>数量</th><th>市值</th></tr></thead><tbody>
+          {dustCosts.map(row=><tr key={row.code}><td><strong>{row.code}</strong></td><td className="number quantity">{displayQuantity(row.quantity)}</td><td className="number value">{money(row.value)}</td></tr>)}
+        </tbody></table></div>
+        <p className="native-summary">按当前可靠市值低于 0.1 USDT 判断；缺价资产不属于微额。市价回到阈值以上时会重新要求成本，不会永久忽略。</p>
+      </details>}
       <p className="native-summary">{costs.state==='none'?'尚未录入任何成本；未知成本不会按零计算。':<>已填写成本覆盖 <strong>{costs.coverage?percent(costs.coverage):'—'}</strong> · 已填写市值 {money(costs.knownValue)} USDT{costs.gain?` · 未实现 ${signed(costs.gain)} USDT`:''}{costs.state!=='complete'&&' · 仅代表已填写成本部分'}{!costs.allConfirmed&&' · 待确认'}</>}</p>
     </section>
 
@@ -126,10 +137,14 @@ export function NativePanel({reader,host,onCosts,initialCosts}:{reader:DirectSpo
       <dl className="native-meta">
         <div><dt>账户</dt><dd>{preview.plan.label}</dd></div>
         <div><dt>快照日期</dt><dd>{preview.plan.date}{preview.existingDates.includes(preview.plan.date)?'（已存在，将覆盖当日）':''}</dd></div>
+        <div><dt>导入 / 排除</dt><dd>{preview.plan.summary.positions} 项 · 排除微额 {preview.plan.summary.excludedCount} 项</dd></div>
         <div><dt>持仓 / 现金</dt><dd>{preview.plan.summary.positions} 项 · USDT {money(preview.plan.summary.cash)}</dd></div>
+        <div><dt>原始 / 导入估值</dt><dd>{money(preview.plan.summary.originalValue)} → {money(preview.plan.summary.importValue)} USDT · 差 {money(preview.plan.summary.difference)}</dd></div>
         <div><dt>已定价小计</dt><dd>{money(preview.plan.summary.valued)} USDT</dd></div>
-        {preview.rate!==null&&preview.plan.baseCurrency!=='USDT'&&preview.plan.summary.valued&&<div><dt>预计基础货币</dt><dd>≈ {money((Number(preview.plan.summary.valued)*preview.rate).toFixed(2))} {preview.plan.baseCurrency}</dd></div>}
+        {preview.rate!==null&&preview.plan.baseCurrency!=='USDT'&&preview.plan.summary.valued&&<div><dt>预计基础货币</dt><dd>≈ {money((Number(preview.plan.summary.importValue??preview.plan.summary.valued)*preview.rate).toFixed(2))} {preview.plan.baseCurrency}</dd></div>}
       </dl>
+      {preview.plan.summary.excludedCount>0&&<label className="check-label native-exclude"><input type="checkbox" checked={excludeDust} onChange={e=>{setExcludeDust(e.target.checked);setPreview(null);setConfirmed(false);}}/>排除微额资产（{preview.plan.summary.excludedCount} 项 · {money(preview.plan.summary.excludedValue)} USDT）：不写入持仓与报价，也不补入现金。</label>}
+      {preview.existingDates.includes(preview.plan.date)&&preview.plan.summary.excludedCount>0&&<p className="native-warn">今日已有快照：本次将以 {preview.plan.summary.positions} 项替换当日持仓。历史快照仍保留旧持仓，不会自动删除。</p>}
       {preview.blocked.length>0&&<div className="native-blocked" role="alert">{preview.blocked.map(code=><p key={code}>{blockedText[code]??code}</p>)}</div>}
       {preview.costUnknownSymbols.length>0&&<div className="native-cost-warning"><p>成本未知：{preview.costUnknownSymbols.join('、')}。宿主没有“成本未知”的表示，缺失 averageCost 会被当作 0，未实现盈亏等于全部市值。请先录入成本；本插件不会用说明性提示代替真实数据隔离。</p></div>}
       {preview.warnings.length>0&&<ul className="native-warnings">{preview.warnings.map((w,i)=><li key={i}>{w.symbol?`${w.symbol} · `:''}{w.detail}</li>)}</ul>}

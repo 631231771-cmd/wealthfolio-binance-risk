@@ -297,3 +297,50 @@ test('提交状态区分已对账、报价待修复与读回失败',async()=>{
  rf.failNextRead();
  assert.equal((await s3.apply(v,KEY,costs,p3,'WRITE')).stage,'readback-failed');
 });
+
+// 9 项持仓：USDT 现金 + BTC/ETH 正常 + 6 项微额。
+function nine(){
+ return valuation([
+  {asset:'USDT',free:'100'},{asset:'BTC',free:'1'},{asset:'ETH',free:'1'},
+  {asset:'D1',free:'1'},{asset:'D2',free:'1'},{asset:'D3',free:'1'},
+  {asset:'D4',free:'1'},{asset:'D5',free:'1'},{asset:'D6',free:'1'}
+ ],{USDT:'1',BTC:'650',ETH:'2500',D1:'0.05',D2:'0.04',D3:'0.03',D4:'0.02',D5:'0.01',D6:'0.001'});
+}
+test('9项含6项微额：只导入3项正常资产，金额差异准确且不补现金',()=>{
+ const v=nine(),before=JSON.stringify(v.state);
+ const plan=buildNativePlan({state:v.state,report:v.report,accountKey:KEY,baseCurrency:'USD',date:DATE,excludeDust:true});
+ assert.deepEqual(plan.holdings.map(h=>h.symbol),['BTC','ETH']);
+ assert.equal(plan.summary.excludedCount,6);
+ assert.equal(plan.summary.excludedValue,'0.15100000');
+ assert.equal(plan.summary.originalValue,'3250.15100000');
+ assert.equal(plan.summary.importValue,'3250.00000000');
+ assert.equal(plan.summary.difference,'0.15100000');
+ assert.deepEqual(plan.cashBalances,{USDT:'100'});
+ assert.deepEqual(plan.excluded.map(r=>r.symbol),['D1','D2','D3','D4','D5','D6']);
+ assert.equal(JSON.stringify(v.state),before); // 不修改 Binance 快照
+});
+test('微额无需成本，不阻止正常资产；缺价资产不属于微额',async()=>{
+ const v=nine();
+ const h=harness();
+ const preview=await new NativeSync(h.bridge).preview(v,KEY,{BTC:{unitCost:'600',source:'confirmed'},ETH:{unitCost:'2400',source:'confirmed'}},{excludeDust:true});
+ assert.equal(preview.blocked.includes('MISSING_COST'),false);
+ assert.equal(preview.plan.summary.costUnknownSymbols.length,0);
+ const unpriced=valuation([{asset:'USDT',free:'100'},{asset:'BTC',free:'1'},{asset:'NOPAIR',free:'5'}],{USDT:'1',BTC:'650'});
+ const plan=buildNativePlan({state:unpriced.state,report:unpriced.report,accountKey:KEY,baseCurrency:'USD',date:DATE,excludeDust:true});
+ assert.deepEqual(plan.holdings.map(h=>h.symbol),['BTC','NOPAIR']);
+ assert.equal(plan.summary.excludedCount,0);
+ assert.ok(plan.summary.costUnknownSymbols.includes('NOPAIR'));
+});
+test('阈值边界：恰好0.1不排除，0.099排除；升值后重新进入导入',()=>{
+ const at=(price:string)=>valuation([{asset:'USDT',free:'100'},{asset:'BTC',free:'1'},{asset:'EDGE',free:'1'}],{USDT:'1',BTC:'650',EDGE:price});
+ const exact=at('0.1');
+ const p1=buildNativePlan({state:exact.state,report:exact.report,accountKey:KEY,baseCurrency:'USD',date:DATE,excludeDust:true});
+ assert.deepEqual(p1.holdings.map(h=>h.symbol),['BTC','EDGE']);
+ const below=at('0.099');
+ const p2=buildNativePlan({state:below.state,report:below.report,accountKey:KEY,baseCurrency:'USD',date:DATE,excludeDust:true});
+ assert.deepEqual(p2.holdings.map(h=>h.symbol),['BTC']);
+ const risen=at('0.2');
+ const p3=buildNativePlan({state:risen.state,report:risen.report,accountKey:KEY,baseCurrency:'USD',date:DATE,excludeDust:true});
+ assert.deepEqual(p3.holdings.map(h=>h.symbol),['BTC','EDGE']);
+ assert.ok(p3.summary.costUnknownSymbols.includes('EDGE')); // 升值后重新要求成本
+});

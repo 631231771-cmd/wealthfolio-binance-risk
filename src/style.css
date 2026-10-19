@@ -198,3 +198,7 @@
 .wrisk-app .cost-confirm { min-height:26px; padding:3px 9px; font-size:11px; }
 .wrisk-app .cost-source { display:block; font-size:9px; color:#8c99ab; margin-top:2px; }
 .wrisk-app .native-repair { margin:14px 24px 0; }
+.wrisk-app .cost-dust { border-top:1px solid #242a34; margin-top:4px; }
+.wrisk-app .cost-dust summary { padding:14px 24px; font-size:12px; color:#acb9ca; cursor:pointer; }
+.wrisk-app .cost-dust .native-summary { margin-top:8px; }
+.wrisk-app .native-exclude { margin:12px 24px 0; color:#c6b89e; }

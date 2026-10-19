@@ -1,7 +1,9 @@
 import {sha256} from '@noble/hashes/sha2.js';
 import {bytesToHex, utf8ToBytes} from '@noble/hashes/utils.js';
-import {nonnegative, type PortfolioState} from './domain';
+import {assetKey, nonnegative, positionKey, type PortfolioState} from './domain';
 import type {calculateRisk} from './domain';
+import type {CostBook} from './cost-basis';
+export type {CostBook} from './cost-basis';
 
 // 原生账户身份与映射。纯函数，不接触 SDK，便于用合成数据验证。
 export const NATIVE_PROVIDER='binance-spot';
@@ -9,6 +11,9 @@ export const NATIVE_CURRENCY='USDT';
 export const CRYPTO_INSTRUMENT='CRYPTO';
 // Binance 现货资产代码的实际范围；不满足的代码不猜映射。
 const NATIVE_SYMBOL=/^[A-Z0-9]{1,20}$/;
+// 微额只按可靠市值判断：没有有效报价的资产不自动归入微额，恰好 0.1 也不算。
+export const DUST_THRESHOLD='0.1';
+export const isDustValue=(value:string|undefined)=>value!==undefined&&nonnegative(value).lt(DUST_THRESHOLD);
 
 export interface NativeHoldingInput {
   symbol:string;
@@ -44,10 +49,10 @@ export interface NativePlan {
   holdings:NativeHoldingInput[];
   cashBalances:Record<string,string>;
   warnings:NativeWarning[];
-  summary:{positions:number;priced:number;unpriced:number;costKnown:number;costUnknown:number;costUnknownSymbols:string[];valued:string|null;cash:string};
+  excluded:{symbol:string;quantity:string;value:string}[];
+  summary:{positions:number;priced:number;unpriced:number;costKnown:number;costUnknown:number;costUnknownSymbols:string[];valued:string|null;cash:string;excludedCount:number;excludedValue:string;originalValue:string|null;importValue:string|null;difference:string};
   fingerprint:string;
 }
-export type CostBook=Readonly<Record<string,{unitCost:string}>>;
 
 // UID 不进原生账本：只保存不可逆的短哈希，用于账户绑定与去重。
 export function nativeAccountKey(uid:string, provider=NATIVE_PROVIDER):string{
@@ -78,10 +83,11 @@ export function planFingerprint(plan:Omit<NativePlan,'fingerprint'>):string{
 }
 
 // 只把能够确定的资产映射为原生持仓；USDT 作为账户现金，而不是一只需要报价的币。
-export function buildNativePlan(args:{state:PortfolioState;report:ReturnType<typeof calculateRisk>;accountKey:string;baseCurrency:string;date:string;costs?:CostBook}):NativePlan{
-  const {state,report,accountKey,baseCurrency,date,costs={}}=args;
+// excludeDust 时，可靠市值 < 0.1 USDT 的持仓不写入快照，也不要求成本。
+export function buildNativePlan(args:{state:PortfolioState;report:ReturnType<typeof calculateRisk>;accountKey:string;baseCurrency:string;date:string;costs?:CostBook;excludeDust?:boolean}):NativePlan{
+  const {state,report,accountKey,baseCurrency,date,costs={},excludeDust=false}=args;
   if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error('DATE_INVALID');
-  const holdings:NativeHoldingInput[]=[],warnings:NativeWarning[]=[],cashBalances:Record<string,string>={};
+  const holdings:NativeHoldingInput[]=[],warnings:NativeWarning[]=[],cashBalances:Record<string,string>={},excluded:{symbol:string;quantity:string;value:string}[]=[];
   let priced=0,unpriced=0,costKnown=0,costUnknown=0;
   const seen=new Set<string>();
   for(const snapshot of Object.values(state.snapshots)){
@@ -93,6 +99,13 @@ export function buildNativePlan(args:{state:PortfolioState;report:ReturnType<typ
       if(quantity.isZero()){warnings.push({code:'ZERO_SKIPPED',symbol:code,detail:'零数量不写入原生快照'});continue;}
       if(code===NATIVE_CURRENCY){cashBalances[code]=quantity.toFixed();warnings.push({code:'USDT_AS_CASH',symbol:code,detail:'USDT 作为账户现金，不作为需要报价的持仓'});continue;}
       if(!NATIVE_SYMBOL.test(code)){warnings.push({code:'UNSUPPORTED_SYMBOL',symbol:code,detail:'资产代码不符合 Binance 现货符号范围，未映射'});continue;}
+      const eligible=report.eligiblePositionKeys.includes(positionKey(snapshot.accountId,position.asset));
+      const value=eligible?report.assetValues[assetKey(position.asset)]:undefined;
+      // 只有“可靠市值且低于阈值”才算微额；缺价资产不属于微额，继续按正常资产处理。
+      if(excludeDust&&isDustValue(value)){
+        excluded.push({symbol:code,quantity:quantity.toFixed(),value:value!});
+        continue;
+      }
       const price=position.price;
       if(price)priced++;else{unpriced++;warnings.push({code:'NO_PRICE',symbol:code,detail:'当前没有有效报价，原生持仓仍写入数量，估值由宿主决定'});}
       const cost=costs[code]?.unitCost;
@@ -106,9 +119,14 @@ export function buildNativePlan(args:{state:PortfolioState;report:ReturnType<typ
     }
   }
   holdings.sort((a,b)=>a.symbol.localeCompare(b.symbol));
+  excluded.sort((a,b)=>a.symbol.localeCompare(b.symbol));
+  const excludedValue=excluded.reduce((sum,row)=>sum.add(row.value),nonnegative('0'));
+  const originalValue=report.coveredSubtotal;
+  const importValue=originalValue===null?null:nonnegative(originalValue).sub(excludedValue).toFixed(8);
   const base:Omit<NativePlan,'fingerprint'>={accountKey,label:nativeAccountLabel(accountKey),currency:NATIVE_CURRENCY,baseCurrency,date,
-    account:nativeAccountInput(accountKey),holdings,cashBalances,warnings,
-    summary:{positions:holdings.length,priced,unpriced,costKnown,costUnknown,costUnknownSymbols:holdings.filter(h=>!h.averageCost).map(h=>h.symbol),valued:report.coveredSubtotal,cash:cashBalances[NATIVE_CURRENCY]??'0'}};
+    account:nativeAccountInput(accountKey),holdings,cashBalances,warnings,excluded,
+    summary:{positions:holdings.length,priced,unpriced,costKnown,costUnknown,costUnknownSymbols:holdings.filter(h=>!h.averageCost).map(h=>h.symbol),valued:report.coveredSubtotal,cash:cashBalances[NATIVE_CURRENCY]??'0',
+      excludedCount:excluded.length,excludedValue:excludedValue.toFixed(8),originalValue,importValue,difference:excludedValue.toFixed(8)}};
   return {...base,fingerprint:planFingerprint(base)};
 }
 

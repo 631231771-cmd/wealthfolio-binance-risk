@@ -40,7 +40,7 @@ export type NativeErrorCode='NOT_CONFIRMED'|'PREVIEW_STALE'|'BLOCKED'|'HOST_UNAV
 export class NativeSyncError extends Error {
   constructor(readonly code:NativeErrorCode,readonly detail?:string){super(code);}
 }
-export interface NativeOptions {allowUnknownCost?:boolean}
+export interface NativeOptions {allowUnknownCost?:boolean;excludeDust?:boolean}
 export interface NativeProbe {
   available:boolean; baseCurrency:string; usdtRate:number|null; rateDiagnostic:RateResolution; accountCount:number;
   bound:NativeAccount|null; reasons:string[];
@@ -50,7 +50,7 @@ export interface NativePreview {
   existingDates:string[]; symbols:NativeCheck['symbols']; validationErrors:string[];
   blocked:string[]; warnings:NativeWarning[];
   rateDiagnostic:RateResolution;
-  allowUnknownCost:boolean; costUnknownSymbols:string[];
+  allowUnknownCost:boolean; costUnknownSymbols:string[]; excludeDust:boolean;
 }
 export type NativeStage='readback-failed'|'quotes-partial'|'reconciled';
 export interface NativeResult {
@@ -106,7 +106,8 @@ export class NativeSync {
     const date=this.host.today();
     const rateDiagnostic=await this.resolveRate(baseCurrency,date);
     const rate=rateDiagnostic.rate;
-    const plan=buildNativePlan({state:value.state,report:value.report,accountKey,baseCurrency,date,costs});
+    const excludeDust=options.excludeDust!==false;
+    const plan=buildNativePlan({state:value.state,report:value.report,accountKey,baseCurrency,date,costs,excludeDust});
     const bound=findBoundAccount(accounts,accountKey,await this.boundId(accountKey));
     let existingDates:string[]=[],symbols:NativeCheck['symbols']=[],validationErrors:string[]=[];
     if(bound){
@@ -121,13 +122,13 @@ export class NativeSync {
     if(plan.summary.costUnknownSymbols.length&&!options.allowUnknownCost)blocked.push('MISSING_COST');
     if(!plan.holdings.length&&!Object.keys(plan.cashBalances).length)blocked.push('EMPTY_PORTFOLIO');
     return {plan,bound,action:bound?'bind':'create',rate,rateDiagnostic,existingDates,symbols,validationErrors,blocked,warnings:plan.warnings,
-      allowUnknownCost:!!options.allowUnknownCost,costUnknownSymbols:plan.summary.costUnknownSymbols};
+      allowUnknownCost:!!options.allowUnknownCost,costUnknownSymbols:plan.summary.costUnknownSymbols,excludeDust};
   }
   // 写入必须显式确认，且预览指纹必须与当前持仓一致，避免用过期预览写账本。
   async apply(value:Valuation,accountKey:string,costs:CostBook,preview:NativePreview,confirmation:'WRITE'):Promise<NativeResult>{
     if(confirmation!=='WRITE')throw new NativeSyncError('NOT_CONFIRMED');
     if(preview.blocked.length)throw new NativeSyncError('BLOCKED',preview.blocked.join(','));
-    const current=buildNativePlan({state:value.state,report:value.report,accountKey,baseCurrency:preview.plan.baseCurrency,date:preview.plan.date,costs});
+    const current=buildNativePlan({state:value.state,report:value.report,accountKey,baseCurrency:preview.plan.baseCurrency,date:preview.plan.date,costs,excludeDust:preview.excludeDust});
     if(current.fingerprint!==preview.plan.fingerprint)throw new NativeSyncError('PREVIEW_STALE');
     const warnings:string[]=[];
     let account=preview.bound,created=false;
