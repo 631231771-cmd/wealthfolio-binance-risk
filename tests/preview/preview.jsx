@@ -50,7 +50,7 @@ const mockNativeHost={
  saveSnapshot:async(id,holdings,cash,date)=>{nativeSaves.push({id,holdings,cash,date});},
  listSnapshots:async()=>[{snapshotDate:nativeSaves.at(-1)?.date??'',positionCount:nativeSaves.at(-1)?.holdings.length??0,cashCurrencyCount:1}],
  getByDate:async()=>(nativeSaves.at(-1)?.holdings??[]).map(h=>({symbol:h.symbol,quantity:Number(h.quantity),assetId:'asset-'+h.symbol,quoteMode:'MARKET'})),
- updateQuote:async()=>{},
+ updateQuote:async()=>{},updateQuoteMode:async()=>{},
  baseCurrency:async()=>'USD',
  // 复现真实宿主 3.10.0：日期汇率接口拒绝 4 位 USDT，但手动最新汇率存在。
  rateForDate:async()=>({rate:null,error:'Invalid currency code: USDT'}),
