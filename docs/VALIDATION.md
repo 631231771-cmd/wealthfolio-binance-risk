@@ -460,3 +460,13 @@ main/v0.1.3 保存基线提交 91f3432；本轮 feature/spot-readonly-offline �
 - 用户明确选择独立小额账户纯只读、不强制IP白名单，并接受连接资料泄露后资产信息可能被读取的风险。只移除ipRestrict===true条件，保留字段必须boolean、enableReading=true、九项危险权限明确false及未知true拒绝。四项本人确认保留且权限说明同步，主机/请求/签名/估值/账本与模拟隔离均不变。
 - **完整npm run verify实际通过122/122项TS、类型、build/package/smoke/receipt、13项既有原生自检和交接。** 新测无IP可读、IP字段缺失/非布尔/读取关闭/额外权限仍拒绝；旧风险基准不回归。未发真实认证，不使用私人凭据。
 - 0.1.11 ZIP SHA256 d00a3bd1e817b6502986cf225122569f8ff4b9efed4041a853dc7ddaf02f80f3，manifest/package/锁文件版本一致，依赖/权限/主机不增加。用户本人已批准安装，实际宿主3.10.0、WRISK测试资料库管理器显示0.1.11，页面打开成功，空持仓/自动关闭/NOT_CONNECTED和等待本人查询已看到；进一步滚动时检测本人输入，立即停止观察，不再捕获当前窗口。没有代点查询/确认、读取密钥或改AI配置。新说明和进行中保留DOM行为仅自动化验证；真实余额仍待本人回报，不能由本次静态/安装通过推断成功。
+
+## v0.2.2 数据可信度与界面（2026-10-19）
+
+- 基线 dd438c6；工作树 `F:\Code\wrisk-ds`，分支 review/ds-0.2.1；两个提交：`0e4ea1b`（报价与历史数据层）、`583173e`（界面、版本与文档）。共享目录 `F:\Code\风控` 的受版本控制文件未修改。
+- 先写会失败的测试再改实现：新增 `tests/quote-reliability.test.ts` 14 项（TTL 0/30/119/120/121 秒、失败保留、30 秒退避、缺 ticker 行、-1220、无市场缓存、参考不降级、断开保留历史、身份匹配、六态标签、仅 USDT、排序稳定、微额边界）。调整 4 项锁定旧"失败即清空"行为的断言，依据见 PRODUCT-0.2.2。
+- **完整 npm run verify 实际通过**：219 项测试、tsc、vite build、ZIP/入口 smoke、构建回执、13 项原生虚构自检与原生快照→插件交接。未发真实账户或私人请求。
+- ZIP `artifacts/wealthfolio-binance-risk-0.2.2.zip`，SHA256 `a4d2bed86c442506f3d85a0b150ac65654ebbca0c5cfecdaf917985ce446e049`；回执 `BUILD-RECEIPT-0.2.2.json`（sourceCommit `583173e`，trackedChanges=false，源码指纹 `0955a67b…`）。manifest/package/锁文件版本均为 0.2.2。
+- 浏览器虚构预览实际检查 11 个场景（完整、USDC 主仓、余额过期、报价过期、部分缺价、报价失败、余额失败、多微额、零余额、420px、920px），Chrome headless 加载本地构建，无 SDK、无网络。**不是 Wealthfolio 实机验收。**
+- 100 资产渲染路径基准 0.54ms/次（merge + risk + presentation），因此未引入状态管理框架。
+- 未验证：真实宿主安装、真实 UID/余额/USDC 估值、自动刷新实机行为、Windows 窄窗主观体验。
