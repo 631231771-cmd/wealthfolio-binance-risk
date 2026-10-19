@@ -123,7 +123,7 @@ export function NativePanel({reader,host,onCosts,initialCosts}:{reader:DirectSpo
         })}
       </tbody></table></div>
       {dustCosts.length>0&&<details className="cost-dust">
-        <summary>微额资产 {dustCosts.length} 项 · 合计 {money(dustValue.toFixed(2))} USDT · 无需录入成本</summary>
+        <summary>微额资产 {dustCosts.length} 项 · 合计 {money(dustValue.toFixed(4),4)} USDT · 无需录入成本</summary>
         <div className="table-scroll"><table className="portfolio-table native-cost-table"><thead><tr><th>资产</th><th>数量</th><th>市值</th></tr></thead><tbody>
           {dustCosts.map(row=><tr key={row.code}><td><strong>{row.code}</strong></td><td className="number quantity">{displayQuantity(row.quantity)}</td><td className="number value">{money(row.value)}</td></tr>)}
         </tbody></table></div>
@@ -139,11 +139,11 @@ export function NativePanel({reader,host,onCosts,initialCosts}:{reader:DirectSpo
         <div><dt>快照日期</dt><dd>{preview.plan.date}{preview.existingDates.includes(preview.plan.date)?'（已存在，将覆盖当日）':''}</dd></div>
         <div><dt>导入 / 排除</dt><dd>{preview.plan.summary.positions} 项 · 排除微额 {preview.plan.summary.excludedCount} 项</dd></div>
         <div><dt>持仓 / 现金</dt><dd>{preview.plan.summary.positions} 项 · USDT {money(preview.plan.summary.cash)}</dd></div>
-        <div><dt>原始 / 导入估值</dt><dd>{money(preview.plan.summary.originalValue)} → {money(preview.plan.summary.importValue)} USDT · 差 {money(preview.plan.summary.difference)}</dd></div>
+        <div><dt>原始 / 导入估值</dt><dd>{money(preview.plan.summary.originalValue)} → {money(preview.plan.summary.importValue)} USDT · 差 {money(preview.plan.summary.difference,4)}</dd></div>
         <div><dt>已定价小计</dt><dd>{money(preview.plan.summary.valued)} USDT</dd></div>
         {preview.rate!==null&&preview.plan.baseCurrency!=='USDT'&&preview.plan.summary.valued&&<div><dt>预计基础货币</dt><dd>≈ {money((Number(preview.plan.summary.importValue??preview.plan.summary.valued)*preview.rate).toFixed(2))} {preview.plan.baseCurrency}</dd></div>}
       </dl>
-      {preview.plan.summary.excludedCount>0&&<label className="check-label native-exclude"><input type="checkbox" checked={excludeDust} onChange={e=>{setExcludeDust(e.target.checked);setPreview(null);setConfirmed(false);}}/>排除微额资产（{preview.plan.summary.excludedCount} 项 · {money(preview.plan.summary.excludedValue)} USDT）：不写入持仓与报价，也不补入现金。</label>}
+      {preview.plan.summary.excludedCount>0&&<label className="check-label native-exclude"><input type="checkbox" checked={excludeDust} onChange={e=>{setExcludeDust(e.target.checked);setPreview(null);setConfirmed(false);}}/>排除微额资产（{preview.plan.summary.excludedCount} 项 · {money(preview.plan.summary.excludedValue,4)} USDT）：不写入持仓与报价，也不补入现金。</label>}
       {preview.existingDates.includes(preview.plan.date)&&preview.plan.summary.excludedCount>0&&<p className="native-warn">今日已有快照：本次将以 {preview.plan.summary.positions} 项替换当日持仓。历史快照仍保留旧持仓，不会自动删除。</p>}
       {preview.blocked.length>0&&<div className="native-blocked" role="alert">{preview.blocked.map(code=><p key={code}>{blockedText[code]??code}</p>)}</div>}
       {preview.costUnknownSymbols.length>0&&<div className="native-cost-warning"><p>成本未知：{preview.costUnknownSymbols.join('、')}。宿主没有“成本未知”的表示，缺失 averageCost 会被当作 0，未实现盈亏等于全部市值。请先录入成本；本插件不会用说明性提示代替真实数据隔离。</p></div>}
