@@ -52,7 +52,7 @@ export function PortfolioOverview({value,reference=null}: {value:Valuation;refer
       {(historical||missing>0||(!current.balanceCurrent&&view.rows.length>0))&&<p className="coverage-callout" role="status">{historical?`${current.balanceCurrent?'报价待更新':'余额待更新'}。正在查看同一份历史估值记录，数量、金额与配置均保持当时口径。`:!current.balanceCurrent?'保留上次持仓，等待有效余额后恢复估值。':`${missing} 项资产待估值；以下小计与配置仅覆盖已定价部分，缺价不计为零。`}{historical&&missing>0&&` 当时还有 ${missing} 项缺价资产。`}</p>}
       <div className="portfolio-columns">
         <section className="portfolio-card holdings"><div className="section-heading"><h2>{historical?'历史持仓':'持仓'}</h2><span className="holdings-meta">{view.rows.length} 项资产{historical?' · 同一快照':''}{view.dust.length>0&&<button className="dust-toggle" aria-pressed={showDust} onClick={()=>setShowDust(v=>!v)}>微额 {view.dust.length} 项 · {showDust?'收起':'展开'}</button>}</span></div>
-          {view.visible.length>0&&list(visibleRows)}
+          {(showDust?view.rows.length:view.visible.length)>0&&list(visibleRows)}
           {!showDust&&view.dust.length>0&&<p className="dust-note">微额 {view.dust.length} 项 · {money(dustValue.toFixed())} USDT · 已计入{historical?'当时':'上述'}总值</p>}
           {!view.rows.length&&<div className="empty-holdings"><span aria-hidden="true">▤</span><strong>{view.balanceCurrent?'当前 Spot 没有非零持仓':'连接后显示真实Spot持仓'}</strong><p>{view.balanceCurrent?'本次成功快照余额为零。':'在连接设置中保存只读凭据并确认查询。'}</p></div>}
           <p className="card-footnote">点击资产查看详情{historical?' · 历史数量与估值':''}</p>
