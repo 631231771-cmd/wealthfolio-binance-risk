@@ -1,6 +1,6 @@
 import {useState,useRef,useEffect} from 'react';
 import {nonnegative,type Price} from './domain';
-import {portfolioPresentation,displayAmount as money,displayPercent as percent,displayTime as time,type Valuation,type Reference} from './portfolio-view';
+import {portfolioPresentation,assetTone,displayAmount as money,displayPercent as percent,displayTime as time,type Valuation,type Reference} from './portfolio-view';
 
 // Local decorative marks only; identity always comes from the full asset code.
 function AssetMark({code}:{code:string}){
@@ -17,9 +17,12 @@ export function PortfolioOverview({value,reference=null,history:_history=new Map
   const row=view.rows.find(r=>r.key===selected);
   useEffect(()=>{if(row&&!dialog.current?.open)dialog.current?.showModal();if(!row&&dialog.current?.open)dialog.current.close();},[row?.key]);
   const unavailable=displayed.report.coveredSubtotal===null;
-  const coverage=`${view.priced} / ${view.rows.length} 项已估值`;
-  const title=historical?'上次估值 · 历史参考':view.complete?'Spot 资产总值':'Spot 已估值资产';
   const missing=view.rows.length-view.priced;
+  // 部分覆盖时，主数值是"已定价小计"，不是完整总值；缺价项数必须紧邻显示。
+  const partial=!historical&&!view.complete&&view.rows.length>0;
+  const coverage=`${view.priced} / ${view.rows.length} 项已估值${missing>0?` · 缺价 ${missing} 项`:''}`;
+  const title=historical?'上次估值 · 历史参考':view.complete?'Spot 资产总值':partial?'已定价小计':'Spot 已估值资产';
+  const previousDiffers=reference!==null&&money(reference.report.coveredSubtotal)!==money(displayed.report.coveredSubtotal);
   const list=(rows:typeof view.rows)=><div className="table-scroll"><table className="portfolio-table"><thead><tr><th>资产</th><th>数量</th><th>价格 <small>USDT</small></th><th>市值 <small>USDT</small></th></tr></thead><tbody>{rows.map(r=><tr key={r.key}>
     <td><button className="asset-button" onClick={()=>setSelected(r.key)} aria-label={'查看 '+r.code+' 详情'}><AssetMark code={r.code}/><span><strong>{r.code}</strong>{r.value===undefined&&<small>{view.balanceCurrent?'待估值':'上次数量'}</small>}</span></button></td>
     <td className="number quantity">{r.quantity}</td><td className="number price">{quote(r.price?.value)}</td><td className="number value">{money(r.value)}{r.value===undefined&&<small>{view.balanceCurrent?'缺少有效价格':'余额已失效'}</small>}</td>
@@ -28,10 +31,10 @@ export function PortfolioOverview({value,reference=null,history:_history=new Map
     <nav className="portfolio-tabs" aria-label="资产视图"><button aria-pressed={tab==='overview'} onClick={()=>setTab('overview')}>资产总览</button><button aria-pressed={tab==='risk'} onClick={()=>setTab('risk')}>风险分析</button></nav>
     {tab==='overview'?<>
       <section className={'portfolio-hero'+(historical?' is-history':'')} aria-label="资产总览" data-valuation={historical?'historical':view.complete?'current':'partial'}>
-        <div className="portfolio-total"><p className="eyebrow">{title}<span className={'valuation-tag '+(historical?'tag-history':view.complete?'tag-current':'')}>{historical?'历史快照':view.complete?'当前有效':unavailable?'等待更新':'部分覆盖'}</span></p>
+        <div className="portfolio-total"><p className={'eyebrow'+(partial?' is-partial':'')}>{title}<span className={'valuation-tag '+(historical?'tag-history':view.complete?'tag-current':'')}>{historical?'历史快照':view.complete?'当前有效':unavailable?'等待更新':'部分覆盖'}</span></p>
           <h2 aria-label={unavailable?'不可用':undefined}>{money(displayed.report.coveredSubtotal)} <small>USDT</small></h2>
           <p className="scope-label">{historical?`${time(at)} · ${view.complete?'当时完整估值':'当时仅部分覆盖'}`:view.rows.length?coverage:view.balanceCurrent?'本次成功快照余额为零。':'连接后显示你的 Spot 资产'}{historical&&<span> · 不代表当前资产</span>}</p>
-          {!historical&&!sameBalances&&reference&&!view.complete&&<p className="previous-valuation">此前估值 {money(reference.report.coveredSubtotal)} USDT · {time(reference.at)} · {reference.report.coverage==='complete'?'当时完整':'当时部分覆盖'}<small>属于另一份余额快照，仅供历史参考，未与当前数量合并。</small></p>}
+          {!historical&&!sameBalances&&reference&&!view.complete&&previousDiffers&&<p className="previous-valuation">此前估值 {money(reference.report.coveredSubtotal)} USDT · {time(reference.at)} · {reference.report.coverage==='complete'?'当时完整':'当时部分覆盖'}<small>属于另一份余额快照，仅供历史参考，未与当前数量合并。</small></p>}
         </div>
         <div className="portfolio-return"><span>持仓累计盈亏</span><strong>— <small>%</small></strong><p>— <small>USDT</small></p><span className="cost-note">成本尚未核实</span></div>
         <div className="portfolio-meta"><span>余额采集 <strong>{time(balanceAt)}</strong></span><span>报价采集 <strong>{priceFrom?time(priceFrom)+(priceTo!==priceFrom?' — '+time(priceTo):''):'暂无市场报价'}</strong></span></div>
@@ -45,8 +48,9 @@ export function PortfolioOverview({value,reference=null,history:_history=new Map
           <p className="card-footnote">点击资产查看详情{historical?' · 历史数量与估值':''}</p>
         </section>
         <section className="portfolio-card allocation"><div className="section-heading"><h2>{historical?'历史资产配置':'资产配置'}</h2><span>{view.complete?'全部资产':'已估值部分'}</span></div>
-          <p className="allocation-scope">{historical?'当时':'当前'}已估值 <strong>{money(displayed.report.coveredSubtotal)} USDT</strong>{!view.complete&&<span>占比仅以这部分市值为分母 · {coverage}</span>}</p>
-          <div className="allocation-list">{view.allocation.filter(r=>!r.dust).map((r,index)=><button className="allocation-row" key={r.key} onClick={()=>setSelected(r.key)} aria-label={'查看 '+r.code+' 配置详情'}><span className="allocation-name"><i className={'allocation-dot tone-'+index%5}/><strong>{r.code}</strong><span>{money(r.value)}</span></span><span className="allocation-track"><i className={'tone-'+index%5} style={{width:(r.weight?nonnegative(r.weight).mul(100).toNumber():0)+'%'}}/></span><span className="allocation-percent">{percent(r.weight)}</span></button>)}</div>
+          {historical&&<p className="allocation-history">历史配置 · 余额 {time(balanceAt)} · 当时 {view.priced} / {view.rows.length} 项已估值{missing>0?` · 缺价 ${missing} 项`:''}</p>}
+          <p className="allocation-scope">{historical?'当时':'当前'}已估值 <strong>{money(displayed.report.coveredSubtotal)} USDT</strong>{!view.complete&&<span>占比仅以这部分市值为分母{historical?null:' · '+coverage}</span>}</p>
+          <div className="allocation-list">{view.allocation.filter(r=>!r.dust).map(r=><button className="allocation-row" key={r.key} onClick={()=>setSelected(r.key)} aria-label={'查看 '+r.code+' 配置详情'}><span className="allocation-name"><i className={'allocation-dot tone-'+assetTone(r.code)}/><strong>{r.code}</strong><span>{money(r.value)}</span></span><span className="allocation-track"><i className={'tone-'+assetTone(r.code)} style={{width:(r.weight?nonnegative(r.weight).mul(100).toNumber():0)+'%'}}/></span><span className="allocation-percent">{percent(r.weight)}</span></button>)}</div>
           {view.dust.length>0&&<div className="allocation-dust"><span>微额 · {view.dust.length} 项</span><span>{money(view.dust.reduce((sum,r)=>sum.add(r.value!),nonnegative('0')).toFixed())} USDT · {percent(view.dust.reduce((sum,r)=>sum.add(r.weight??'0'),nonnegative('0')).toFixed())}</span></div>}
           {!view.allocation.length&&<div className="allocation-empty">{view.balanceCurrent&&view.rows.length===0?'暂无资产配置':'等待可用估值'}<br/><small>{view.balanceCurrent&&view.rows.length===0?'零余额不计算占比':'缺价资产仍保留数量'}</small></div>}
           <p className="card-footnote">{historical?'历史配置不参与当前风险计算':'包含稳定币 · 按已估值市值排序'}</p>

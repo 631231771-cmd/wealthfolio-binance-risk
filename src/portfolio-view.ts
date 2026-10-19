@@ -34,6 +34,12 @@ export function portfolioView(value:Valuation,history:ReadonlyMap<string,Price>=
   return {rows,visible:rows.filter(r=>!r.dust),dust:rows.filter(r=>r.dust),allocation:rows.filter(r=>r.value!==undefined),
     priced:rows.filter(r=>r.value!==undefined).length,complete:report.coverage==='complete',balanceCurrent:report.currentAccountIds.length>0};
 }
+// 配色只跟随资产身份，不跟随排序或微额过滤；同一代码在任何视图都是同一色调。
+export function assetTone(code:string){
+  let hash=0;
+  for(const ch of code)hash=(hash*31+ch.codePointAt(0)!)>>>0;
+  return hash%5;
+}
 export function displayAmount(value:string|null|undefined,places=2){
   if(value==null)return '—';
   const n=nonnegative(value);

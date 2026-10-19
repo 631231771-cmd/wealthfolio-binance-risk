@@ -120,6 +120,9 @@
 .wrisk-app .dust summary { font-size:12px; color:#acb9ca; padding:16px 24px; }
 .wrisk-app .dust summary>span { display:block; font-size:10px; color:#8c99ab; margin-top:4px; padding-left:14px; }
 .wrisk-app .allocation-scope { padding:0 24px; font-size:11px; color:var(--muted); }
+/* 部分覆盖时，主数值的标签必须自己说明口径，而不是靠读者推断。 */
+.wrisk-app .portfolio-total .eyebrow.is-partial { color:#d3bd93; }
+.wrisk-app .allocation-history { padding:0 24px; margin:2px 0 6px; font-size:11px; color:#b3a68d; }
 .wrisk-app .allocation-scope strong { color:#c5d0de; font-weight:400; }
 .wrisk-app .allocation-scope>span { display:block; margin-top:6px; }
 .wrisk-app .allocation-list { padding:8px 24px 0; }
